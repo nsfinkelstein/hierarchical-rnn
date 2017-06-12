@@ -34,13 +34,12 @@ def hmlstm_layer(c, h, h_below, h_above, z, z_below, state_size=200):
     # process gates
     joint_input = tf.add(
         tf.add(tf.matmul(w, h), tf.multiply(z, tf.matmul(wa, h_above))),
-        tf.add(tf.multiply(z_below, tf.matmul(wb, h_below)), b)
-    )
+        tf.add(tf.multiply(z_below, tf.matmul(wb, h_below)), b))
 
     f = tf.sigmoid(joint_input[:state_size])
-    i = tf.sigmoid(joint_input[state_size: 2 * state_size])
-    o = tf.sigmoid(joint_input[2 * state_size: 3 * state_size])
-    g = tf.tanh(joint_input[3 * state_size: 4 * state_size])
+    i = tf.sigmoid(joint_input[state_size:2 * state_size])
+    o = tf.sigmoid(joint_input[2 * state_size:3 * state_size])
+    g = tf.tanh(joint_input[3 * state_size:4 * state_size])
     z_tilde = tf.contrib.keras.backend.hard_sigmoid(joint_input[-1])
 
     new_z = tf.constant(np.random.binomial(1, z_tilde))
@@ -55,25 +54,5 @@ def hmlstm_layer(c, h, h_below, h_above, z, z_below, state_size=200):
     return new_c, new_h, new_z
 
 
-# set placeholders
-x = tf.placeholder(tf.float32, shape=(input_size, 1))
-hidden_state = tf.placeholder(tf.float32, shape=(state_size, 1))
-cell_state = tf.placeholder(tf.float32, shape=(state_size, 1))
-cs, hs = lstm(x, cell_state, hidden_state)
-
-constants = {
-    x: random.rand(input_size, 1),
-    cell_state: np.zeros((state_size, 1)),
-    hidden_state: np.zeros((state_size, 1)),
-}
-session = tf.Session()
-init = tf.global_variables_initializer()
-session.run(init)
-for _ in range(200):
-    cos, hos = session.run([cs, hs], constants)
-    constants = {
-        x: random.rand(input_size, 1),
-        cell_state: cos,
-        hidden_state: hos,
-    }
-    print(cos, hos)
+def embedding_layer(inputs):
+    pass

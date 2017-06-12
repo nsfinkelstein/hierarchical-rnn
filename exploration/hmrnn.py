@@ -41,16 +41,11 @@ class hmlstm(object):
         g = tf.tanh(joint_input[3 * self.state_size:4 * self.state_size])
         z_tilde = tf.sigmoid(joint_input[-1:])
 
-        # TODO: FIX CONDITIONAL
-        print(z_tilde.get_shape())
-        new_z = tf.case(
-            {
-                tf.greater(z_tilde[0], tf.constant(.5, dtype=tf.float32)[0]):
-                lambda: np.ones(1),
-                tf.less_equal(z_tilde[0], tf.constant(.5, dtype=tf.float32)[0]):
-                lambda: np.zeros(1),
-            }, default=lambda: np.zeros(1)
-        )
+        # TODO: Make sure this condition actually works
+        new_z = tf.cond(
+            tf.greater(tf.squeeze(z_tilde),
+                       tf.squeeze(tf.constant(.5, dtype=tf.float32))),
+            lambda: tf.ones(1), lambda: tf.zeros(1))
 
         # copy is handled in the run method
         def update():
@@ -66,8 +61,8 @@ class hmlstm(object):
         return new_c, new_h, new_z
 
     def run(self, signal, epochs=100):
-        init = tf.global_variables_initializer()
         session = tf.Session()
+        init = tf.global_variables_initializer()
         session.run(init)
 
         # for first run

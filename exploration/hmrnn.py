@@ -7,10 +7,16 @@ import numpy as np
 
 
 class hmlstm(object):
-    def __init__(self, layers=3, state_size=5, batch_size=100, step_size=1):
+    def __init__(self,
+                 layers=3,
+                 state_size=5,
+                 batch_size=100,
+                 step_size=1,
+                 output_size=29):
         self.state_size = state_size
         self.batch_size = batch_size
         self.step_size = step_size
+        self.output_size = output_size
         self.c = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h_below = tf.placeholder(tf.float32, shape=(state_size, 1))
@@ -20,8 +26,13 @@ class hmlstm(object):
         self.iteration = tf.placeholder(tf.float32, shape=())
         self.num_layers = layers
         self.layers = [self.hmlstm_layer() for _ in range(layers)]
-        self.hidden_states = tf.placeholder(tf.float32, shape=(layers, state_size))
+        self.hidden_states = tf.placeholder(
+            tf.float32, shape=(layers, state_size))
         self.prediction = self.output_module()
+        self.current_output = tf.placeholder(
+            tf.float32, shape=(output_size, 1))
+        self.loss = self.calculate_loss()
+        self.train = self.minimize_loss()
 
     def hmlstm_layer(self):
         # set biases and weights
@@ -46,7 +57,8 @@ class hmlstm(object):
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
         o = tf.sigmoid(joint_input[2 * self.state_size:3 * self.state_size])
         g = tf.tanh(joint_input[3 * self.state_size:4 * self.state_size])
-        slope_multiplier = .02 + (self.iteration / 1e5) # for slope annealing trick
+        slope_multiplier = .02 + (self.iteration / 1e5
+                                  )  # for slope annealing trick
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
         # see: https://r2rt.com/binary-stochastic-neurons-in-tensorflow.html
@@ -93,7 +105,6 @@ class hmlstm(object):
 
         # feed forward network
         hidden_size = 200
-        output_size = 29  # alphanumeric, period, comma, space
 
         # first layer
         b1 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
@@ -108,17 +119,11 @@ class hmlstm(object):
         l2 = tf.nn.tanh(tf.matmul(w2, l1) + b2)
 
         # output
-        b3 = tf.Variable(np.random.rand(output_size, 1), dtype=tf.float32)
+        b3 = tf.Variable(np.random.rand(self.output_size, 1), dtype=tf.float32)
         w3 = tf.Variable(
-            np.random.rand(output_size, hidden_size), dtype=tf.float32)
+            np.random.rand(self.output_size, hidden_size), dtype=tf.float32)
         prediction = tf.nn.softmax(tf.matmul(w3, l2) + b3)
         return prediction
-
-
-    def batch(self):
-        batch_s
-        pass
-
 
     def run(self, signal, epochs=100):
         session = tf.Session()
@@ -147,12 +152,18 @@ class hmlstm(object):
                 last_run = current_run
 
                 hidden_states = np.array([h[1][:, 0] for h in current_run])
-                prediction = session.run([self.prediction],
-                                         {self.hidden_states: hidden_states})
+                session.run([self.train], {
+                    self.hidden_states: hidden_states,
+                    self.current_output: s
+                })
 
-                loss = tf.losses.softmax_cross_entropy(signal[t + 1], prediction)
-                tf.contrib.layers.optimize_loss(loss, , .1, 'Adam')
+    def calculate_loss(self):
+        return tf.losses.softmax_cross_entropy(self.current_output,
+                                               self.prediction)
 
+    def minimize_loss(self):
+        optimizer = tf.train.GradientDescentOptimizer(0.5)
+        return optimizer.minimize(self.loss)
 
     def _get_placeholders(self, last_run, current_run, i, s, iteration):
         if i == len(self.layers) - 1:

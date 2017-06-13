@@ -16,6 +16,8 @@ class hmlstm(object):
         self.z_below = tf.placeholder(tf.float32, shape=(1))
         self.num_layers = layers
         self.layers = [self.hmlstm_layer() for _ in range(layers)]
+        self.hidden_states = tf.placeholder(tf.float32, shape=(layers, state_size))
+        self.prediction = self.output_module()
 
     def hmlstm_layer(self):
         # set biases and weights
@@ -89,6 +91,12 @@ class hmlstm(object):
 
                     current_run[i] = session.run(l, placeholders)
 
+                hidden_states = np.array([h[1][:, 0] for h in current_run])
+                prediction = session.run([self.prediction],
+                                         {self.hidden_states: hidden_states})
+
+                # TODO: Calculate prediction loss
+
                 last_run = current_run
 
     def get_placeholders(self, last_run, current_run, i, s):
@@ -108,7 +116,7 @@ class hmlstm(object):
         }
         return placeholders
 
-    def output_module(self, inputs):
+    def output_module(self):
         # inputs are concatenated output from all hidden layers
         # assume they come in L x state_size
 
@@ -116,16 +124,17 @@ class hmlstm(object):
         init_weights = np.random.rand(self.num_layers,
                                       self.state_size * self.num_layers)
         gate_weights = tf.Variable(init_weights, dtype=tf.float32)
-        col_inputs = tf.reshape(inputs, (self.num_layers * self.state_size, 1))
+        col_inputs = tf.reshape(self.hidden_states, (self.num_layers * self.state_size, 1))
         gates = tf.sigmoid(tf.matmul(gate_weights, col_inputs))
-        gated = tf.multiply(gates, inputs)
+        gated = tf.multiply(gates, self.hidden_states)
 
         # embedding
         embedding_size = 100
         em_init_weights = np.random.rand(self.state_size, embedding_size)
-        embedding_weights = tf.Variable(init_weights, dtype=tf.float32)
+        embedding_weights = tf.Variable(em_init_weights, dtype=tf.float32)
         embedding = tf.nn.relu(
             tf.reduce_sum(tf.matmul(gated, embedding_weights), axis=0))
+        col_embedding = tf.reshape(embedding, (embedding_size, 1))
 
         # feed forward network
         hidden_size = 200
@@ -133,16 +142,19 @@ class hmlstm(object):
 
         # first layer
         b1 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
-        w1 = tf.Variable(np.random.rand(hidden_size, embedding_size), dtype=tf.float32)
-        l1 = tf.nn.tanh(tf.matmul(w1, embedding) + b1)
+        w1 = tf.Variable(
+            np.random.rand(hidden_size, embedding_size), dtype=tf.float32)
+        l1 = tf.nn.tanh(tf.matmul(w1, col_embedding) + b1)
 
         # second layer
         b2 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
-        w2 = tf.Variable(np.random.rand(hidden_size, hidden_size), dtype=tf.float32)
+        w2 = tf.Variable(
+            np.random.rand(hidden_size, hidden_size), dtype=tf.float32)
         l2 = tf.nn.tanh(tf.matmul(w2, l1) + b2)
 
         # output
         b3 = tf.Variable(np.random.rand(output_size, 1), dtype=tf.float32)
-        w3 = tf.Variable(np.random.rand(output_size, hidden_size), dtype=tf.float32)
-        output = tf.nn.softmax(tf.matmul(w3, l2) + b3)
-
+        w3 = tf.Variable(
+            np.random.rand(output_size, hidden_size), dtype=tf.float32)
+        prediction = tf.nn.softmax(tf.matmul(w3, l2) + b3)
+        return prediction

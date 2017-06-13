@@ -1,3 +1,4 @@
+from tensorflow.python.framework import ops
 import tensorflow as tf
 import numpy as np
 
@@ -6,14 +7,17 @@ import numpy as np
 
 
 class hmlstm(object):
-    def __init__(self, layers=3, state_size=5):
+    def __init__(self, layers=3, state_size=5, batch_size=100, step_size=1):
         self.state_size = state_size
+        self.batch_size = batch_size
+        self.step_size = step_size
         self.c = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h_below = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h_above = tf.placeholder(tf.float32, shape=(state_size, 1))
-        self.z = tf.placeholder(tf.float32, shape=(1))
-        self.z_below = tf.placeholder(tf.float32, shape=(1))
+        self.z = tf.placeholder(tf.float32, shape=())
+        self.z_below = tf.placeholder(tf.float32, shape=())
+        self.iteration = tf.placeholder(tf.float32, shape=())
         self.num_layers = layers
         self.layers = [self.hmlstm_layer() for _ in range(layers)]
         self.hidden_states = tf.placeholder(tf.float32, shape=(layers, state_size))
@@ -42,14 +46,14 @@ class hmlstm(object):
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
         o = tf.sigmoid(joint_input[2 * self.state_size:3 * self.state_size])
         g = tf.tanh(joint_input[3 * self.state_size:4 * self.state_size])
-        z_tilde = tf.sigmoid(joint_input[-1:])
+        slope_multiplier = .02 + (self.iteration / 1e5) # for slope annealing trick
+        z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
-        # TODO: Make sure this condition actually works
-        new_z = tf.cond(
-            tf.greater(
-                tf.squeeze(z_tilde),
-                tf.squeeze(tf.constant(.5, dtype=tf.float32))),
-            lambda: tf.ones(1), lambda: tf.zeros(1))
+        # see: https://r2rt.com/binary-stochastic-neurons-in-tensorflow.html
+        graph = tf.get_default_graph()
+        with ops.name_scope('BinaryRound') as name:
+            with graph.gradient_override_map({'Round': 'Identity'}):
+                new_z = tf.round(z_tilde, name=name)
 
         # copy is handled in the run method
         def update():
@@ -58,7 +62,6 @@ class hmlstm(object):
         def flush():
             return tf.multiply(i, g)
 
-        # TODO: Make sure this condition actually works
         new_c = tf.cond(
             tf.equal(
                 tf.squeeze(self.z),
@@ -66,55 +69,6 @@ class hmlstm(object):
 
         new_h = tf.multiply(o, tf.tanh(new_c))
         return new_c, new_h, new_z
-
-    def run(self, signal, epochs=100):
-        session = tf.Session()
-        init = tf.global_variables_initializer()
-        session.run(init)
-
-        for _ in range(epochs):
-
-            # for first run
-            ones = np.ones((self.state_size, 1))
-            last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
-            current_run = [(1., 1., 1.)] * len(self.layers)
-            for t, s in enumerate(signal):
-
-                for i, l in enumerate(self.layers):
-                    # short circut copy operation
-                    if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
-                        current_run[i] = last_run[i]
-                        continue
-
-                    placeholders = self.get_placeholders(
-                        last_run, current_run, i, s)
-
-                    current_run[i] = session.run(l, placeholders)
-
-                hidden_states = np.array([h[1][:, 0] for h in current_run])
-                prediction = session.run([self.prediction],
-                                         {self.hidden_states: hidden_states})
-
-                # TODO: Calculate prediction loss
-
-                last_run = current_run
-
-    def get_placeholders(self, last_run, current_run, i, s):
-        if i == len(self.layers) - 1:
-            # for top layer, the hidden state from above is zero
-            ha = np.zeros((self.state_size, 1))
-        else:
-            ha = last_run[i + 1][1]
-
-        placeholders = {
-            self.c: last_run[i][0],
-            self.h: last_run[i][1],
-            self.z: last_run[i][2],
-            self.h_below: s.reshape(-1, 1) if i == 0. else last_run[i - 1][1],
-            self.h_above: ha,
-            self.z_below: np.ones(1) if i == 0. else last_run[i - 1][2],
-        }
-        return placeholders
 
     def output_module(self):
         # inputs are concatenated output from all hidden layers
@@ -124,7 +78,8 @@ class hmlstm(object):
         init_weights = np.random.rand(self.num_layers,
                                       self.state_size * self.num_layers)
         gate_weights = tf.Variable(init_weights, dtype=tf.float32)
-        col_inputs = tf.reshape(self.hidden_states, (self.num_layers * self.state_size, 1))
+        col_inputs = tf.reshape(self.hidden_states,
+                                (self.num_layers * self.state_size, 1))
         gates = tf.sigmoid(tf.matmul(gate_weights, col_inputs))
         gated = tf.multiply(gates, self.hidden_states)
 
@@ -158,3 +113,61 @@ class hmlstm(object):
             np.random.rand(output_size, hidden_size), dtype=tf.float32)
         prediction = tf.nn.softmax(tf.matmul(w3, l2) + b3)
         return prediction
+
+
+    def batch(self):
+        batch_s
+        pass
+
+
+    def run(self, signal, epochs=100):
+        session = tf.Session()
+        init = tf.global_variables_initializer()
+        session.run(init)
+
+        for e in range(epochs):
+
+            # for first run
+            ones = np.ones((self.state_size, 1))
+            last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
+            current_run = [(1., 1., 1.)] * len(self.layers)
+            for t, s in enumerate(signal[:-1]):
+
+                for i, l in enumerate(self.layers):
+                    # short circut copy operation
+                    if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
+                        current_run[i] = last_run[i]
+                        continue
+
+                    placeholders = self._get_placeholders(
+                        last_run, current_run, i, s, (e * len(signal)) + t)
+
+                    current_run[i] = session.run(l, placeholders)
+
+                last_run = current_run
+
+                hidden_states = np.array([h[1][:, 0] for h in current_run])
+                prediction = session.run([self.prediction],
+                                         {self.hidden_states: hidden_states})
+
+                loss = tf.losses.softmax_cross_entropy(signal[t + 1], prediction)
+                tf.contrib.layers.optimize_loss(loss, , .1, 'Adam')
+
+
+    def _get_placeholders(self, last_run, current_run, i, s, iteration):
+        if i == len(self.layers) - 1:
+            # for top layer, the hidden state from above is zero
+            ha = np.zeros((self.state_size, 1))
+        else:
+            ha = last_run[i + 1][1]
+
+        placeholders = {
+            self.c: last_run[i][0],
+            self.h: last_run[i][1],
+            self.z: last_run[i][2],
+            self.h_below: s.reshape(-1, 1) if i == 0. else last_run[i - 1][1],
+            self.h_above: ha,
+            self.z_below: np.ones(1) if i == 0. else last_run[i - 1][2],
+            self.iteration: iteration,
+        }
+        return placeholders

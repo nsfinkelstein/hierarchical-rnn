@@ -19,15 +19,9 @@ class hmlstm(object):
         self.batch_size = batch_size
         self.step_size = step_size
         self.output_size = output_size
-        self.c = tf.placeholder(tf.float32, shape=(state_size, 1))
-        self.h = tf.placeholder(tf.float32, shape=(state_size, 1))
-        self.h_below = tf.placeholder(tf.float32, shape=(state_size, 1))
-        self.h_above = tf.placeholder(tf.float32, shape=(state_size, 1))
-        self.z = tf.placeholder(tf.float32, shape=())
-        self.z_below = tf.placeholder(tf.float32, shape=())
+
         self.iteration = tf.placeholder(tf.float32, shape=())
         self.num_layers = layers
-        self.layers = [self.hmlstm_layer() for _ in range(layers)]
         self.hidden_states = tf.placeholder(
             tf.float32, shape=(layers, state_size))
         self.prediction = self.output_module()
@@ -37,7 +31,17 @@ class hmlstm(object):
         self.loss = self.calculate_loss()
         self.train = self.minimize_loss()
 
-    def hmlstm_layer(self):
+        self.old_hidden_states = tf.Variable(np.zeros((layers + 1, state_size)), dtype=tf.float32, trainable=False)
+        self.old_cell_states = tf.Variable(np.zeros((layers, state_size)), dtype=tf.float32, trainable=False)
+        self.old_indicators = tf.Variable(np.ones(layers), dtype=tf.int32, trainable=False)
+
+        self.current_hidden_states = tf.Variable(np.zeros((layers + 1, state_size)), dtype=tf.float32, trainable=False)
+        self.current_cell_states = tf.Variable(np.zeros((layers, state_size)), dtype=tf.float32, trainable=False)
+        self.current_indicators = tf.Variable(np.ones(layers + 1), dtype=tf.int32, trainable=False)
+        
+        self.layers = [self.hmlstm_layer(level) for level in range(layers)]
+
+    def hmlstm_layer(self, level):
         # create bias and weight variables
         weight_size = (self.state_size * 4) + 1
         b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
@@ -52,14 +56,59 @@ class hmlstm(object):
         # calculate LSTM-like gates
         joint_input = tf.add(
             tf.add(
-                tf.matmul(w, self.h),
-                tf.multiply(self.z, tf.matmul(wa, self.h_above))),
-            tf.add(tf.multiply(self.z_below, tf.matmul(wb, self.h_below)), b))
+                tf.matmul(w, self.old_hidden_states[level]),
+                tf.multiply(self.old_indicators[level],
+                            tf.matmul(wa, self.old_hidden_states[level + 1]))),
+            tf.add(tf.multiply(self.z_below,
+                            tf.matmul(wb, self.current_hidden_states[level]))
+                   , b))
 
         f = tf.sigmoid(joint_input[:self.state_size])
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
         o = tf.sigmoid(joint_input[2 * self.state_size:3 * self.state_size])
         g = tf.tanh(joint_input[3 * self.state_size:4 * self.state_size])
+
+        # these are the three possible operations
+        def copy():
+            return (self.old_cell_states[level], self.old_hidden_states[level])
+
+        def update():
+            return (tf.add(tf.multiply(f, self.old_cell_states[level]), tf.multiply(i, g)),
+                    tf.multiply(o, tf.tanh(new_c)))
+
+        def flush():
+            return (tf.multiply(i, g), tf.multiply(o, tf.tanh(new_c)))
+
+        # calculate new cell and hidden states
+        # TODO: Figure out indexing with hidden and future states
+        new_c, new_h = tf.case([
+            (tf.equal(
+                self.old_indicators[level],
+                tf.constant(1, dtype=tf.int32)
+            ), flush),
+
+            (tf.logical_and(
+                tf.equal(
+                    self.old_indicators[level],
+                    tf.constant(0, dtype=tf.int32)
+                ),
+                tf.equal(
+                    self.current_indicators[level],
+                    tf.constant(0, dtype=tf.int32)
+                )
+            ), copy),
+
+            (tf.logical_and(
+                tf.equal(
+                    self.old_indicators[level],
+                    tf.constant(0, dtype=tf.int32)
+                ),
+                tf.equal(
+                    self.current_indicators[level - 1],
+                    tf.constant(1, dtype=tf.int32)
+                )
+            ), update),
+        ], default=copy, exclusive=True)
 
         # use slope annealing trick
         slope_multiplier = .02 + (self.iteration / 1e5)
@@ -71,20 +120,6 @@ class hmlstm(object):
         with ops.name_scope('BinaryRound') as name:
             with graph.gradient_override_map({'Round': 'Identity'}):
                 new_z = tf.round(z_tilde, name=name)
-
-        # copy is handled in the run method
-        def update():
-            return tf.add(tf.multiply(f, self.c), tf.multiply(i, g))
-
-        def flush():
-            return tf.multiply(i, g)
-
-        # calculate new cell and hidden states
-        new_c = tf.cond(
-            tf.equal(
-                tf.squeeze(self.z),
-                tf.squeeze(tf.constant(1, dtype=tf.float32))), flush, update)
-        new_h = tf.multiply(o, tf.tanh(new_c))
 
         return new_c, new_h, tf.squeeze(new_z)
 
@@ -154,8 +189,7 @@ class hmlstm(object):
 
                     for i, l in enumerate(self.layers):
                         # short circut copy operation
-                        if last_run[i][2] == 0. and current_run[i -
-                                                                1][2] == 0.:
+                        if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
                             current_run[i] = last_run[i]
                             continue
 

@@ -3,14 +3,13 @@ import tensorflow as tf
 import numpy as np
 
 # TODO: Make sure conditionals all work (types match)
-# TODO: allow for different size input and hidden state
 
 
 class hmlstm(object):
     def __init__(self,
                  layers=3,
                  state_size=5,
-                 batch_size=100,
+                 batch_size=50,
                  step_size=1,
                  output_size=29):
         self.state_size = state_size
@@ -136,26 +135,35 @@ class hmlstm(object):
             ones = np.ones((self.state_size, 1))
             last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
             current_run = [(1., 1., 1.)] * len(self.layers)
-            for t, s in enumerate(signal[:-1]):
 
-                for i, l in enumerate(self.layers):
-                    # short circut copy operation
-                    if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
-                        current_run[i] = last_run[i]
-                        continue
+            batch_start = 0
+            batch_end = self.batch_size
+            while batch_end <= len(signal):
 
-                    placeholders = self._get_placeholders(
-                        last_run, current_run, i, s, (e * len(signal)) + t)
+                for t, s in enumerate(signal[batch_start:batch_end]):
 
-                    current_run[i] = session.run(l, placeholders)
+                    for i, l in enumerate(self.layers):
+                        # short circut copy operation
+                        if last_run[i][2] == 0. and current_run[i -
+                                                                1][2] == 0.:
+                            current_run[i] = last_run[i]
+                            continue
 
-                last_run = current_run
+                        placeholders = self._get_placeholders(
+                            last_run, current_run, i, s, (e * len(signal)) + t)
 
-                hidden_states = np.array([h[1][:, 0] for h in current_run])
-                session.run([self.train], {
-                    self.hidden_states: hidden_states,
-                    self.current_output: s
-                })
+                        current_run[i] = session.run(l, placeholders)
+
+                    last_run = current_run
+
+                    hidden_states = np.array([h[1][:, 0] for h in current_run])
+                    session.run([self.train], {
+                        self.hidden_states: hidden_states,
+                        self.current_output: s
+                    })
+
+                batch_start += 1
+                batch_end += 1
 
     def calculate_loss(self):
         return tf.losses.softmax_cross_entropy(self.current_output,

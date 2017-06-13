@@ -1,12 +1,12 @@
 import tensorflow as tf
 import numpy as np
-import scipy.stats as st
 
+# TODO: Make sure conditionals all work (types match)
 # TODO: allow for different size input and hidden state
 
 
 class hmlstm(object):
-    def __init__(self, layers=3, state_size=200):
+    def __init__(self, layers=3, state_size=5):
         self.state_size = state_size
         self.c = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.h = tf.placeholder(tf.float32, shape=(state_size, 1))
@@ -14,6 +14,7 @@ class hmlstm(object):
         self.h_above = tf.placeholder(tf.float32, shape=(state_size, 1))
         self.z = tf.placeholder(tf.float32, shape=(1))
         self.z_below = tf.placeholder(tf.float32, shape=(1))
+        self.num_layers = layers
         self.layers = [self.hmlstm_layer() for _ in range(layers)]
 
     def hmlstm_layer(self):
@@ -43,8 +44,9 @@ class hmlstm(object):
 
         # TODO: Make sure this condition actually works
         new_z = tf.cond(
-            tf.greater(tf.squeeze(z_tilde),
-                       tf.squeeze(tf.constant(.5, dtype=tf.float32))),
+            tf.greater(
+                tf.squeeze(z_tilde),
+                tf.squeeze(tf.constant(.5, dtype=tf.float32))),
             lambda: tf.ones(1), lambda: tf.zeros(1))
 
         # copy is handled in the run method
@@ -55,7 +57,10 @@ class hmlstm(object):
             return tf.multiply(i, g)
 
         # TODO: Make sure this condition actually works
-        new_c = tf.cond(tf.equal(self.z, tf.placeholder(1)), flush, update)
+        new_c = tf.cond(
+            tf.equal(
+                tf.squeeze(self.z),
+                tf.squeeze(tf.constant(1, dtype=tf.float32))), flush, update)
 
         new_h = tf.multiply(o, tf.tanh(new_c))
         return new_c, new_h, new_z
@@ -65,44 +70,79 @@ class hmlstm(object):
         init = tf.global_variables_initializer()
         session.run(init)
 
-        # for first run
-        ones = np.ones((self.state_size, 1))
-        last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
         for _ in range(epochs):
 
+            # for first run
+            ones = np.ones((self.state_size, 1))
+            last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
+            current_run = [(1., 1., 1.)] * len(self.layers)
             for t, s in enumerate(signal):
-                current_run = []
-                print(t)
 
                 for i, l in enumerate(self.layers):
-                    # short circut copy operator
-                    if last_run[i][2] == 0 and current_run[i - 1][2] == 0:
+                    # short circut copy operation
+                    if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
                         current_run[i] = last_run[i]
                         continue
 
-                    if i == len(self.layers) - 1:
-                        ha = np.zeros((self.state_size, 1))
-                    else:
-                        ha = last_run[i + 1][1]
-
-                    placeholders = {
-                        self.c:
-                        last_run[i][0],
-                        self.h:
-                        last_run[i][1],
-                        self.z:
-                        last_run[i][2],
-                        self.h_below:
-                        s.reshape(-1, 1) if i == 0 else last_run[i - 1][1],
-                        self.h_above:
-                        ha,
-                        self.z_below:
-                        np.ones(1) if i == 0 else last_run[i - 1][2],
-                    }
+                    placeholders = self.get_placeholders(
+                        last_run, current_run, i, s)
 
                     current_run[i] = session.run(l, placeholders)
 
                 last_run = current_run
 
-    def output_module(inputs):
-        pass
+    def get_placeholders(self, last_run, current_run, i, s):
+        if i == len(self.layers) - 1:
+            # for top layer, the hidden state from above is zero
+            ha = np.zeros((self.state_size, 1))
+        else:
+            ha = last_run[i + 1][1]
+
+        placeholders = {
+            self.c: last_run[i][0],
+            self.h: last_run[i][1],
+            self.z: last_run[i][2],
+            self.h_below: s.reshape(-1, 1) if i == 0. else last_run[i - 1][1],
+            self.h_above: ha,
+            self.z_below: np.ones(1) if i == 0. else last_run[i - 1][2],
+        }
+        return placeholders
+
+    def output_module(self, inputs):
+        # inputs are concatenated output from all hidden layers
+        # assume they come in L x state_size
+
+        # gates
+        init_weights = np.random.rand(self.num_layers,
+                                      self.state_size * self.num_layers)
+        gate_weights = tf.Variable(init_weights, dtype=tf.float32)
+        col_inputs = tf.reshape(inputs, (self.num_layers * self.state_size, 1))
+        gates = tf.sigmoid(tf.matmul(gate_weights, col_inputs))
+        gated = tf.multiply(gates, inputs)
+
+        # embedding
+        embedding_size = 100
+        em_init_weights = np.random.rand(self.state_size, embedding_size)
+        embedding_weights = tf.Variable(init_weights, dtype=tf.float32)
+        embedding = tf.nn.relu(
+            tf.reduce_sum(tf.matmul(gated, embedding_weights), axis=0))
+
+        # feed forward network
+        hidden_size = 200
+        output_size = 29  # alphanumeric, period, comma, space
+
+        # first layer
+        b1 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
+        w1 = tf.Variable(np.random.rand(hidden_size, embedding_size), dtype=tf.float32)
+        l1 = tf.nn.tanh(tf.matmul(w1, embedding) + b1)
+
+        # second layer
+        b2 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
+        w2 = tf.Variable(np.random.rand(hidden_size, hidden_size), dtype=tf.float32)
+        l2 = tf.nn.tanh(tf.matmul(w2, l1) + b2)
+
+        # output
+        b3 = tf.Variable(np.random.rand(output_size, 1), dtype=tf.float32)
+        w3 = tf.Variable(np.random.rand(output_size, hidden_size), dtype=tf.float32)
+        output = tf.nn.softmax(tf.matmul(w3, l2) + b3)
+

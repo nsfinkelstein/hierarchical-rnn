@@ -1,14 +1,17 @@
 from tensorflow.python.framework import ops
+from string import ascii_lowercase
 import tensorflow as tf
 import numpy as np
+import re
 
+# TODO: Enable input different from hidden state size
 # TODO: Make sure conditionals all work (types match)
 
 
 class hmlstm(object):
     def __init__(self,
                  layers=3,
-                 state_size=5,
+                 state_size=29,
                  batch_size=50,
                  step_size=1,
                  output_size=29):
@@ -30,11 +33,12 @@ class hmlstm(object):
         self.prediction = self.output_module()
         self.current_output = tf.placeholder(
             tf.float32, shape=(output_size, 1))
+        self.current_loss = tf.placeholder(tf.float32, shape=())
         self.loss = self.calculate_loss()
         self.train = self.minimize_loss()
 
     def hmlstm_layer(self):
-        # set biases and weights
+        # create bias and weight variables
         weight_size = (self.state_size * 4) + 1
         b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
 
@@ -45,7 +49,7 @@ class hmlstm(object):
         wa = tf.Variable(initialize_weights(), dtype=tf.float32)
         wb = tf.Variable(initialize_weights(), dtype=tf.float32)
 
-        # process gates
+        # calculate LSTM-like gates
         joint_input = tf.add(
             tf.add(
                 tf.matmul(w, self.h),
@@ -56,10 +60,12 @@ class hmlstm(object):
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
         o = tf.sigmoid(joint_input[2 * self.state_size:3 * self.state_size])
         g = tf.tanh(joint_input[3 * self.state_size:4 * self.state_size])
-        slope_multiplier = .02 + (self.iteration / 1e5
-                                  )  # for slope annealing trick
+
+        # use slope annealing trick
+        slope_multiplier = .02 + (self.iteration / 1e5)
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
+        # replace gradient calculation - use straight-through estimator
         # see: https://r2rt.com/binary-stochastic-neurons-in-tensorflow.html
         graph = tf.get_default_graph()
         with ops.name_scope('BinaryRound') as name:
@@ -73,13 +79,14 @@ class hmlstm(object):
         def flush():
             return tf.multiply(i, g)
 
+        # calculate new cell and hidden states
         new_c = tf.cond(
             tf.equal(
                 tf.squeeze(self.z),
                 tf.squeeze(tf.constant(1, dtype=tf.float32))), flush, update)
-
         new_h = tf.multiply(o, tf.tanh(new_c))
-        return new_c, new_h, new_z
+
+        return new_c, new_h, tf.squeeze(new_z)
 
     def output_module(self):
         # inputs are concatenated output from all hidden layers
@@ -122,7 +129,8 @@ class hmlstm(object):
         w3 = tf.Variable(
             np.random.rand(self.output_size, hidden_size), dtype=tf.float32)
         prediction = tf.nn.softmax(tf.matmul(w3, l2) + b3)
-        return prediction
+        return tf.reshape(prediction, (self.output_size, 1))
+
 
     def run(self, signal, epochs=100):
         session = tf.Session()
@@ -132,10 +140,12 @@ class hmlstm(object):
         for e in range(epochs):
 
             # for first run
-            ones = np.ones((self.state_size, 1))
-            last_run = [(ones, ones, np.ones(1)) for _ in self.layers]
-            current_run = [(1., 1., 1.)] * len(self.layers)
+            last_run = [(np.random.rand(self.state_size, 1), np.random.rand(
+                self.state_size, 1), 1.) for _ in self.layers]
+            current_run = [(np.random.rand(self.state_size, 1), np.random.rand(
+                self.state_size, 1), 1.) for _ in self.layers]
 
+            step_size = 1
             batch_start = 0
             batch_end = self.batch_size
             while batch_end <= len(signal):
@@ -157,13 +167,20 @@ class hmlstm(object):
                     last_run = current_run
 
                     hidden_states = np.array([h[1][:, 0] for h in current_run])
-                    session.run([self.train], {
+
+                    loss = session.run([self.loss], {
                         self.hidden_states: hidden_states,
-                        self.current_output: s
+                        self.current_output: signal[t + 1].reshape(1, self.output_size)
                     })
 
-                batch_start += 1
-                batch_end += 1
+                    print(loss)
+                    session.run([self.train], {
+                        self.current_loss: loss,
+                    })
+
+
+                batch_start += step_size
+                batch_end = batch_start + self.batch_size
 
     def calculate_loss(self):
         return tf.losses.softmax_cross_entropy(self.current_output,
@@ -171,22 +188,66 @@ class hmlstm(object):
 
     def minimize_loss(self):
         optimizer = tf.train.GradientDescentOptimizer(0.5)
-        return optimizer.minimize(self.loss)
+        return optimizer.minimize(self.current_loss)
 
     def _get_placeholders(self, last_run, current_run, i, s, iteration):
+        # for top layer, the hidden state from above is zero
         if i == len(self.layers) - 1:
-            # for top layer, the hidden state from above is zero
             ha = np.zeros((self.state_size, 1))
         else:
             ha = last_run[i + 1][1]
+
+        # for bottom layer, input is signal
+        if i == 0:
+            hb = s.reshape(-1, 1)
+        else:
+            hb = current_run[i - 1][1]
 
         placeholders = {
             self.c: last_run[i][0],
             self.h: last_run[i][1],
             self.z: last_run[i][2],
-            self.h_below: s.reshape(-1, 1) if i == 0. else last_run[i - 1][1],
+            self.h_below: hb,
             self.h_above: ha,
-            self.z_below: np.ones(1) if i == 0. else last_run[i - 1][2],
+            self.z_below: 1 if i == 0 else current_run[i - 1][2],
             self.iteration: iteration,
         }
         return placeholders
+
+
+def text():
+    text = load_text()
+    text = text.replace('\n', ' ')
+    text = re.sub(' +', ' ', text)
+    return one_hot_encode(text)
+
+
+def load_text():
+    with open('text.txt', 'r') as f:
+        text = f.read()
+    return text
+
+
+def one_hot_encode(text):
+    out = np.zeros((len(text), 29))
+
+    def get_index(char):
+        answers = {',': 26, '.': 27}
+
+        if char in answers:
+            return answers[char]
+
+        try:
+            return ascii_lowercase.index(char)
+        except:
+            return 28
+
+    for i, t in enumerate(text):
+        out[i, get_index(t)] = 1
+
+    return out
+
+if __name__ == '__main__':
+    y = text()
+    m = hmlstm()
+    m.run(y)

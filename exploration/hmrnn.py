@@ -4,9 +4,6 @@ import tensorflow as tf
 import numpy as np
 import re
 
-# TODO: Enable input different from hidden state size
-# TODO: Make sure conditionals all work (types match)
-
 
 class hmlstm(object):
     def __init__(self,
@@ -54,18 +51,26 @@ class hmlstm(object):
 
         # hmlstm layers variables
         weight_size = (state_size * 4) + 1
-        self.b = [tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
-                  for _ in range(layers)]
+        self.b = [
+            tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
+            for _ in range(layers)
+        ]
 
         def initialize_weights():
             return np.random.rand(weight_size, self.state_size)
 
-        self.w = [tf.Variable(initialize_weights(), dtype=tf.float32)
-                  for _ in range(layers)]
-        self.wa = [tf.Variable(initialize_weights(), dtype=tf.float32)
-                   for _ in range(layers)]
-        self.wb = [tf.Variable(initialize_weights(), dtype=tf.float32)
-                   for _ in range(layers)]
+        self.w = [
+            tf.Variable(initialize_weights(), dtype=tf.float32)
+            for _ in range(layers)
+        ]
+        self.wa = [
+            tf.Variable(initialize_weights(), dtype=tf.float32)
+            for _ in range(layers)
+        ]
+        self.wb = [
+            tf.Variable(initialize_weights(), dtype=tf.float32)
+            for _ in range(layers)
+        ]
 
     def hmlstm_layer(self, c, h, z, h_below, h_above, z_below, layer):
         # calculate LSTM-like gates
@@ -134,8 +139,8 @@ class hmlstm(object):
         raw_gates = tf.sigmoid(tf.matmul(self.gate_weights, col_inputs))
         gates = tf.reshape(raw_gates, shape=[self.num_layers, 1])
         gated = tf.multiply(gates,
-                            tf.reshape(hidden_states,
-                                       (self.num_layers, self.state_size)))
+                            tf.reshape(hidden_states, (self.num_layers,
+                                                       self.state_size)))
 
         # embedding
         prod = tf.matmul(gated, self.embed_weights)

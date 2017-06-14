@@ -137,36 +137,14 @@ class hmlstm(object):
         return tf.reshape(prediction, (self.output_size, 1))
 
     def full_stack(self):
-        states = [[0] * self.num_layers] * self.num_batches
-        predictions = [0] * self.num_batches
+        states = [[0] * self.num_layers] * self.batch_size
+        predictions = [0] * self.batch_size
 
         # results are stored in the order: c, h, z
         for t in range(self.batch_size):
             for l in range(self.num_layers):
-                if l == 0:
-                    z_below = 1
-                    h_below = self.batch_input[t]
-                else:
-                    z_below = states[t][l - 1][2]
-                    h_below = states[t][l - 1][1]
-
-                if t == 0:
-                    c = tf.zeros([self.state_size, 1])
-                    h = tf.zeros([self.state_size, 1])
-                    h_above = tf.zeros([self.state_size, 1])
-                    z = 1
-                else:
-                    c = states[t - 1][l][0]
-                    h = states[t - 1][l][1]
-                    z = states[t - 1][l][2]
-
-                    if l != self.num_layers - 1:
-                        h_above = [t - 1][l + 1][1]
-                    else:
-                        h_above = tf.zeros([self.state_size, 1])
-
-                states[t][l] = self.hmlstm_layer(c, h, z, h_below, h_above,
-                                                 z_below)
+                args = self._get_hmlstm_args(t, l, states)
+                states[t][l] = self.hmlstm_layer(*args)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
             predictions[t] = self.output_module(hidden_states)
@@ -179,6 +157,32 @@ class hmlstm(object):
         total_loss = tf.reduce_mean(losses)
 
         return total_loss
+
+    def _get_hmlstm_args(self, t, l, states):
+        if l == 0:
+            z_below = 1
+            h_below = self.batch_input[t]
+        else:
+            z_below = states[t][l - 1][2]
+            h_below = states[t][l - 1][1]
+
+        if t == 0:
+            c = tf.zeros([self.state_size, 1])
+            h = tf.zeros([self.state_size, 1])
+            h_above = tf.zeros([self.state_size, 1])
+            z = 1
+        else:
+            c = states[t - 1][l][0]
+            h = states[t - 1][l][1]
+            z = states[t - 1][l][2]
+
+            if l != self.num_layers - 1:
+                h_above = [t - 1][l + 1][1]
+            else:
+                h_above = tf.zeros([self.state_size, 1])
+
+        return c, h, z, h_below, h_above, z_below
+
 
     def run(self, signal, epochs=100):
         session = tf.Session()

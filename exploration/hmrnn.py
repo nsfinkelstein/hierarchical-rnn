@@ -55,21 +55,25 @@ class hmlstm(object):
 
         # hmlstm layers variables
         weight_size = (state_size * 4) + 1
-        self.b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
+        self.b = [tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
+                  for _ in range(layers)]
 
         def initialize_weights():
             return np.random.rand(weight_size, self.state_size)
 
-        self.w = tf.Variable(initialize_weights(), dtype=tf.float32)
-        self.wa = tf.Variable(initialize_weights(), dtype=tf.float32)
-        self.wb = tf.Variable(initialize_weights(), dtype=tf.float32)
+        self.w = [tf.Variable(initialize_weights(), dtype=tf.float32)
+                  for _ in range(layers)]
+        self.wa = [tf.Variable(initialize_weights(), dtype=tf.float32)
+                   for _ in range(layers)]
+        self.wb = [tf.Variable(initialize_weights(), dtype=tf.float32)
+                   for _ in range(layers)]
 
-    def hmlstm_layer(self, c, h, z, h_below, h_above, z_below):
+    def hmlstm_layer(self, c, h, z, h_below, h_above, z_below, layer):
         # calculate LSTM-like gates
-        s_recurrent = tf.matmul(self.w, h)
-        s_top = tf.multiply(z, tf.matmul(self.wa, h_above))
-        s_bottom = tf.multiply(z_below, tf.matmul(self.wb, h_below))
-        joint_input = tf.add_n((s_recurrent, s_top, s_bottom, self.b))
+        s_recurrent = tf.matmul(self.w[layer], h)
+        s_top = tf.multiply(z, tf.matmul(self.wa[layer], h_above))
+        s_bottom = tf.multiply(z_below, tf.matmul(self.wb[layer], h_below))
+        joint_input = tf.add_n((s_recurrent, s_top, s_bottom, self.b[layer]))
 
         f = tf.sigmoid(joint_input[:self.state_size])
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
@@ -132,7 +136,7 @@ class hmlstm(object):
         gated = tf.multiply(gates, hidden_states)
 
         # embedding
-        prod = tf.matmul(gated, self.embedding_weights)
+        prod = tf.matmul(gated, self.embed_weights)
         embedding = tf.nn.relu(tf.reduce_sum(prod, axis=0))
         col_embedding = tf.reshape(embedding, (self.embedding_size, 1))
 
@@ -190,7 +194,7 @@ class hmlstm(object):
             else:
                 h_above = tf.zeros([self.state_size, 1])
 
-        return c, h, z, h_below, h_above, z_below
+        return c, h, z, h_below, h_above, z_below, l
 
     def run(self, signal, epochs=100):
         session = tf.Session()

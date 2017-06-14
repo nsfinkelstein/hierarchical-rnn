@@ -209,6 +209,9 @@ class hmlstm(object):
         init = tf.global_variables_initializer()
         session.run(init)
 
+        loss = self.full_stack()
+        train = self.minimize_loss(loss)
+
         for epoch in range(epochs):
             step_size = 1
             batch_start = 0
@@ -220,8 +223,6 @@ class hmlstm(object):
                 for i, s in enumerate(signal[batch_start + 1:batch_end + 1]):
                     batch_out[i, 0] = np.where(s == 1)[0][0]
 
-                loss = self.full_stack()
-                train = self.minimize_loss(loss)
                 _loss, _ = session.run(
                     [loss, train],
                     feed_dict={

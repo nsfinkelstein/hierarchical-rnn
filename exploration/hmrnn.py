@@ -28,10 +28,9 @@ class hmlstm(object):
         self.out_hidden_size = 200
 
         # placeholders
-        out_shape = (batch_size, output_size)
         in_shape = (batch_size, output_size, 1)
-        self.batch_output = tf.placeholder(tf.int32, shape=out_shape)
         self.batch_input = tf.placeholder(tf.float32, shape=in_shape)
+        self.batch_output = tf.placeholder(tf.int32, shape=(batch_size, 1))
         self.epoch = tf.placeholder(tf.float32, shape=())
 
         # output module variables
@@ -132,8 +131,11 @@ class hmlstm(object):
         col_inputs = tf.reshape(hidden_states,
                                 (self.num_layers * self.state_size, 1))
 
-        gates = tf.sigmoid(tf.matmul(self.gate_weights, col_inputs))
-        gated = tf.multiply(gates, hidden_states)
+        raw_gates = tf.sigmoid(tf.matmul(self.gate_weights, col_inputs))
+        gates = tf.reshape(raw_gates, shape=[self.num_layers, 1])
+        gated = tf.multiply(gates,
+                            tf.reshape(hidden_states,
+                                       (self.num_layers, self.state_size)))
 
         # embedding
         prod = tf.matmul(gated, self.embed_weights)
@@ -165,9 +167,10 @@ class hmlstm(object):
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
             prediction = self.output_module(hidden_states)
+            logits = tf.reshape(prediction, (1, self.output_size))
             total_loss = tf.add(total_loss,
                                 tf.nn.sparse_softmax_cross_entropy_with_logits(
-                                    logits=prediction,
+                                    logits=logits,
                                     labels=self.batch_output[t]))
         return total_loss
 
@@ -207,19 +210,19 @@ class hmlstm(object):
             batch_end = self.batch_size
             while batch_end < len(signal):
                 batch_in = signal[batch_start:batch_end]
-                batch_out = signal[batch_start + 1:batch_end + 1]
+                batch_in_shaped = batch_in.reshape(self.batch_size, -1, 1)
+                batch_out = np.zeros((self.batch_size, 1))
+                for i, s in enumerate(signal[batch_start + 1:batch_end + 1]):
+                    batch_out[i, 0] = np.where(s == 1)[0][0]
 
                 loss = self.full_stack()
                 train = self.minimize_loss(loss)
                 _loss, _ = session.run(
                     [loss, train],
                     feed_dict={
-                        self.batch_input:
-                        batch_in.reshape(self.batch_size, -1, 1),
-                        self.batch_output:
-                        batch_out,
-                        self.epoch:
-                        epoch,
+                        self.batch_input: batch_in_shaped,
+                        self.batch_output: batch_out,
+                        self.epoch: epoch,
                     })
                 print(_loss)
 

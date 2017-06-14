@@ -115,7 +115,7 @@ class hmlstm(object):
             exclusive=True)
 
         # use slope annealing trick
-        slope_multiplier = tf.maximum(.02 + (self.epoch / 1e5),
+        slope_multiplier = tf.maximum(tf.constant(.02) + self.epoch,
                                       tf.constant(5.))
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 

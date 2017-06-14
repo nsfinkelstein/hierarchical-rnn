@@ -14,35 +14,62 @@ class hmlstm(object):
                  state_size=29,
                  batch_size=50,
                  step_size=1,
-                 output_size=29):
+                 output_size=29,
+                 embedding_size=100,
+                 out_hidden_size=200):
+
+        # model configuration values
         self.state_size = state_size
         self.batch_size = batch_size
         self.step_size = step_size
         self.output_size = output_size
         self.num_layers = layers
+        self.embedding_size = embedding_size
+        self.out_hidden_size = 200
 
-        self.batch_output = tf.placeholder(
-            tf.float32, shape=(batch_size, output_size))
-        self.batch_input = tf.placeholder(
-            tf.float32, shape=(batch_size, output_size))
+        # placeholders
+        out_shape = (batch_size, output_size)
+        in_shape = (batch_size, output_size, 1)
+        self.batch_output = tf.placeholder(tf.int32, shape=out_shape)
+        self.batch_input = tf.placeholder(tf.float32, shape=in_shape)
         self.epoch = tf.placeholder(tf.float32, shape=())
 
-    def hmlstm_layer(self, c, h, z, h_below, h_above, z_below):
-        # create bias and weight variables
-        weight_size = (self.state_size * 4) + 1
-        b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
+        # output module variables
+        init_gate_weights = np.random.rand(layers, state_size * layers)
+        init_emb_weights = np.random.rand(state_size, embedding_size)
+        self.gate_weights = tf.Variable(init_gate_weights, dtype=tf.float32)
+        self.embed_weights = tf.Variable(init_emb_weights, dtype=tf.float32)
+
+        def init_bias():
+            return np.random.rand(out_hidden_size, 1)
+
+        self.b1 = tf.Variable(init_bias(), dtype=tf.float32)
+        self.b2 = tf.Variable(init_bias(), dtype=tf.float32)
+        self.b3 = tf.Variable(np.random.rand(output_size, 1), dtype=tf.float32)
+        init_w1 = np.random.rand(out_hidden_size, embedding_size)
+        self.w1 = tf.Variable(init_w1, dtype=tf.float32)
+        init_w2 = np.random.rand(out_hidden_size, out_hidden_size)
+        self.w2 = tf.Variable(init_w2, dtype=tf.float32)
+        init_w3 = np.random.rand(output_size, out_hidden_size)
+        self.w3 = tf.Variable(init_w3, dtype=tf.float32)
+
+        # hmlstm layers variables
+        weight_size = (state_size * 4) + 1
+        self.b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
 
         def initialize_weights():
             return np.random.rand(weight_size, self.state_size)
 
-        w = tf.Variable(initialize_weights(), dtype=tf.float32)
-        wa = tf.Variable(initialize_weights(), dtype=tf.float32)
-        wb = tf.Variable(initialize_weights(), dtype=tf.float32)
+        self.w = tf.Variable(initialize_weights(), dtype=tf.float32)
+        self.wa = tf.Variable(initialize_weights(), dtype=tf.float32)
+        self.wb = tf.Variable(initialize_weights(), dtype=tf.float32)
 
+    def hmlstm_layer(self, c, h, z, h_below, h_above, z_below):
         # calculate LSTM-like gates
-        joint_input = tf.add(
-            tf.add(tf.matmul(w, h), tf.multiply(z, tf.matmul(wa, h_above))),
-            tf.add(tf.multiply(self.z_below, tf.matmul(wb, h_below)), b))
+        s_recurrent = tf.matmul(self.w, h)
+        s_top = tf.multiply(z, tf.matmul(self.wa, h_above))
+        s_bottom = tf.multiply(z_below, tf.matmul(self.wb, h_below))
+        joint_input = tf.add_n((s_recurrent, s_top, s_bottom, self.b))
 
         f = tf.sigmoid(joint_input[:self.state_size])
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
@@ -54,29 +81,34 @@ class hmlstm(object):
             return (c, h)
 
         def update():
-            return (tf.add(tf.multiply(f, c), tf.multiply(i, g)), tf.multiply(
-                o, tf.tanh(new_c)))
+            nc = tf.add(tf.multiply(f, c), tf.multiply(i, g))
+            nh = tf.multiply(o, tf.tanh(nc))
+            return nc, nh
 
         def flush():
-            return (tf.multiply(i, g), tf.multiply(o, tf.tanh(new_c)))
+            nc = tf.multiply(i, g)
+            nh = tf.multiply(o, tf.tanh(nc))
+            return nc, nh
 
         # calculate new cell and hidden states
         new_c, new_h = tf.case(
             [
-                (tf.equal(z, tf.constant(1, dtype=tf.int32)), flush),
+                (tf.equal(z, tf.constant(1, dtype=tf.float32)), flush),
                 (tf.logical_and(
-                    tf.equal(z, tf.constant(0, dtype=tf.int32)),
-                    tf.equal(z_below, tf.constant(0, dtype=tf.int32))), copy),
+                    tf.equal(z, tf.constant(0, dtype=tf.float32)),
+                    tf.equal(z_below, tf.constant(0, dtype=tf.float32))),
+                 copy),
                 (tf.logical_and(
-                    tf.equal(z, tf.constant(0, dtype=tf.int32)),
-                    tf.equal(z_below, tf.constant(1, dtype=tf.int32))),
+                    tf.equal(z, tf.constant(0, dtype=tf.float32)),
+                    tf.equal(z_below, tf.constant(1, dtype=tf.float32))),
                  update),
             ],
             default=update,
             exclusive=True)
 
         # use slope annealing trick
-        slope_multiplier = max(.02 + (self.iteration / 1e5), 5)
+        slope_multiplier = tf.maximum(.02 + (self.epoch / 1e5),
+                                      tf.constant(5.))
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
         # replace gradient calculation - use straight-through estimator
@@ -93,74 +125,51 @@ class hmlstm(object):
         # assume they come in L x state_size
 
         # gates
-        init_weights = np.random.rand(self.num_layers,
-                                      self.state_size * self.num_layers)
-        gate_weights = tf.Variable(init_weights, dtype=tf.float32)
         col_inputs = tf.reshape(hidden_states,
                                 (self.num_layers * self.state_size, 1))
 
-        gates = tf.sigmoid(tf.matmul(gate_weights, col_inputs))
+        gates = tf.sigmoid(tf.matmul(self.gate_weights, col_inputs))
         gated = tf.multiply(gates, hidden_states)
 
         # embedding
-        embedding_size = 100
-        em_init_weights = np.random.rand(self.state_size, embedding_size)
-        embedding_weights = tf.Variable(em_init_weights, dtype=tf.float32)
-        embedding = tf.nn.relu(
-            tf.reduce_sum(tf.matmul(gated, embedding_weights), axis=0))
-        col_embedding = tf.reshape(embedding, (embedding_size, 1))
+        prod = tf.matmul(gated, self.embedding_weights)
+        embedding = tf.nn.relu(tf.reduce_sum(prod, axis=0))
+        col_embedding = tf.reshape(embedding, (self.embedding_size, 1))
 
         # feed forward network
-        hidden_size = 200
-
         # first layer
-        b1 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
-        w1 = tf.Variable(
-            np.random.rand(hidden_size, embedding_size), dtype=tf.float32)
-        l1 = tf.nn.tanh(tf.matmul(w1, col_embedding) + b1)
+        l1 = tf.nn.tanh(tf.matmul(self.w1, col_embedding) + self.b1)
 
         # second layer
-        b2 = tf.Variable(np.random.rand(hidden_size, 1), dtype=tf.float32)
-        w2 = tf.Variable(
-            np.random.rand(hidden_size, hidden_size), dtype=tf.float32)
-        l2 = tf.nn.tanh(tf.matmul(w2, l1) + b2)
-
-        # output
-        b3 = tf.Variable(np.random.rand(self.output_size, 1), dtype=tf.float32)
-        w3 = tf.Variable(
-            np.random.rand(self.output_size, hidden_size), dtype=tf.float32)
+        l2 = tf.nn.tanh(tf.matmul(self.w2, l1) + self.b2)
 
         # the loss function used below
-        # sparce_softmax_cross_entropy_with_logits
+        # sparse_softmax_cross_entropy_with_logits
         # calls softmax, so we just pass the linear result through here
-        prediction = tf.matmul(w3, l2) + b3
+        prediction = tf.matmul(self.w3, l2) + self.b3
         return tf.reshape(prediction, (self.output_size, 1))
 
     def full_stack(self):
         states = [[0] * self.num_layers] * self.batch_size
-        predictions = [0] * self.batch_size
 
         # results are stored in the order: c, h, z
+        total_loss = tf.constant(0.0)
         for t in range(self.batch_size):
             for l in range(self.num_layers):
                 args = self._get_hmlstm_args(t, l, states)
                 states[t][l] = self.hmlstm_layer(*args)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
-            predictions[t] = self.output_module(hidden_states)
-
-        losses = [
-            tf.nn.sparse_softmax_cross_entropy_with_logits(logits=p, labels=y)
-            for p, y in zip(predictions, self.batch_output)
-        ]
-
-        total_loss = tf.reduce_mean(losses)
-
+            prediction = self.output_module(hidden_states)
+            total_loss = tf.add(total_loss,
+                                tf.nn.sparse_softmax_cross_entropy_with_logits(
+                                    logits=prediction,
+                                    labels=self.batch_output[t]))
         return total_loss
 
     def _get_hmlstm_args(self, t, l, states):
         if l == 0:
-            z_below = 1
+            z_below = 1.
             h_below = self.batch_input[t]
         else:
             z_below = states[t][l - 1][2]
@@ -170,19 +179,18 @@ class hmlstm(object):
             c = tf.zeros([self.state_size, 1])
             h = tf.zeros([self.state_size, 1])
             h_above = tf.zeros([self.state_size, 1])
-            z = 1
+            z = 1.
         else:
             c = states[t - 1][l][0]
             h = states[t - 1][l][1]
             z = states[t - 1][l][2]
 
             if l != self.num_layers - 1:
-                h_above = [t - 1][l + 1][1]
+                h_above = states[t - 1][l + 1][1]
             else:
                 h_above = tf.zeros([self.state_size, 1])
 
         return c, h, z, h_below, h_above, z_below
-
 
     def run(self, signal, epochs=100):
         session = tf.Session()
@@ -193,18 +201,23 @@ class hmlstm(object):
             step_size = 1
             batch_start = 0
             batch_end = self.batch_size
-            while batch_end <= len(signal):
+            while batch_end < len(signal):
+                batch_in = signal[batch_start:batch_end]
+                batch_out = signal[batch_start + 1:batch_end + 1]
 
                 loss = self.full_stack()
                 train = self.minimize_loss(loss)
                 _loss, _ = session.run(
                     [loss, train],
                     feed_dict={
-                        self.batch_input: signal[batch_start:batch_end],
+                        self.batch_input:
+                        batch_in.reshape(self.batch_size, -1, 1),
                         self.batch_output:
-                        signal[batch_start + 1:batch_end + 1],
-                        self.epoch: epoch,
+                        batch_out,
+                        self.epoch:
+                        epoch,
                     })
+                print(_loss)
 
                 batch_start += step_size
                 batch_end = batch_start + self.batch_size

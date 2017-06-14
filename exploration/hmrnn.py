@@ -19,29 +19,15 @@ class hmlstm(object):
         self.batch_size = batch_size
         self.step_size = step_size
         self.output_size = output_size
-
-        self.iteration = tf.placeholder(tf.float32, shape=())
         self.num_layers = layers
-        self.hidden_states = tf.placeholder(
-            tf.float32, shape=(layers, state_size))
-        self.prediction = self.output_module()
-        self.current_output = tf.placeholder(
-            tf.float32, shape=(output_size, 1))
-        self.current_loss = tf.placeholder(tf.float32, shape=())
-        self.loss = self.calculate_loss()
-        self.train = self.minimize_loss()
 
-        self.old_hidden_states = tf.Variable(np.zeros((layers + 1, state_size)), dtype=tf.float32, trainable=False)
-        self.old_cell_states = tf.Variable(np.zeros((layers, state_size)), dtype=tf.float32, trainable=False)
-        self.old_indicators = tf.Variable(np.ones(layers), dtype=tf.int32, trainable=False)
+        self.batch_output = tf.placeholder(
+            tf.float32, shape=(batch_size, output_size))
+        self.batch_input = tf.placeholder(
+            tf.float32, shape=(batch_size, output_size))
+        self.epoch = tf.placeholder(tf.float32, shape=())
 
-        self.current_hidden_states = tf.Variable(np.zeros((layers + 1, state_size)), dtype=tf.float32, trainable=False)
-        self.current_cell_states = tf.Variable(np.zeros((layers, state_size)), dtype=tf.float32, trainable=False)
-        self.current_indicators = tf.Variable(np.ones(layers + 1), dtype=tf.int32, trainable=False)
-        
-        self.layers = [self.hmlstm_layer(level) for level in range(layers)]
-
-    def hmlstm_layer(self, level):
+    def hmlstm_layer(self, c, h, z, h_below, h_above, z_below):
         # create bias and weight variables
         weight_size = (self.state_size * 4) + 1
         b = tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
@@ -55,13 +41,8 @@ class hmlstm(object):
 
         # calculate LSTM-like gates
         joint_input = tf.add(
-            tf.add(
-                tf.matmul(w, self.old_hidden_states[level]),
-                tf.multiply(self.old_indicators[level],
-                            tf.matmul(wa, self.old_hidden_states[level + 1]))),
-            tf.add(tf.multiply(self.z_below,
-                            tf.matmul(wb, self.current_hidden_states[level]))
-                   , b))
+            tf.add(tf.matmul(w, h), tf.multiply(z, tf.matmul(wa, h_above))),
+            tf.add(tf.multiply(self.z_below, tf.matmul(wb, h_below)), b))
 
         f = tf.sigmoid(joint_input[:self.state_size])
         i = tf.sigmoid(joint_input[self.state_size:2 * self.state_size])
@@ -70,48 +51,32 @@ class hmlstm(object):
 
         # these are the three possible operations
         def copy():
-            return (self.old_cell_states[level], self.old_hidden_states[level])
+            return (c, h)
 
         def update():
-            return (tf.add(tf.multiply(f, self.old_cell_states[level]), tf.multiply(i, g)),
-                    tf.multiply(o, tf.tanh(new_c)))
+            return (tf.add(tf.multiply(f, c), tf.multiply(i, g)), tf.multiply(
+                o, tf.tanh(new_c)))
 
         def flush():
             return (tf.multiply(i, g), tf.multiply(o, tf.tanh(new_c)))
 
         # calculate new cell and hidden states
-        # TODO: Figure out indexing with hidden and future states
-        new_c, new_h = tf.case([
-            (tf.equal(
-                self.old_indicators[level],
-                tf.constant(1, dtype=tf.int32)
-            ), flush),
-
-            (tf.logical_and(
-                tf.equal(
-                    self.old_indicators[level],
-                    tf.constant(0, dtype=tf.int32)
-                ),
-                tf.equal(
-                    self.current_indicators[level],
-                    tf.constant(0, dtype=tf.int32)
-                )
-            ), copy),
-
-            (tf.logical_and(
-                tf.equal(
-                    self.old_indicators[level],
-                    tf.constant(0, dtype=tf.int32)
-                ),
-                tf.equal(
-                    self.current_indicators[level - 1],
-                    tf.constant(1, dtype=tf.int32)
-                )
-            ), update),
-        ], default=copy, exclusive=True)
+        new_c, new_h = tf.case(
+            [
+                (tf.equal(z, tf.constant(1, dtype=tf.int32)), flush),
+                (tf.logical_and(
+                    tf.equal(z, tf.constant(0, dtype=tf.int32)),
+                    tf.equal(z_below, tf.constant(0, dtype=tf.int32))), copy),
+                (tf.logical_and(
+                    tf.equal(z, tf.constant(0, dtype=tf.int32)),
+                    tf.equal(z_below, tf.constant(1, dtype=tf.int32))),
+                 update),
+            ],
+            default=update,
+            exclusive=True)
 
         # use slope annealing trick
-        slope_multiplier = .02 + (self.iteration / 1e5)
+        slope_multiplier = max(.02 + (self.iteration / 1e5), 5)
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
         # replace gradient calculation - use straight-through estimator
@@ -123,7 +88,7 @@ class hmlstm(object):
 
         return new_c, new_h, tf.squeeze(new_z)
 
-    def output_module(self):
+    def output_module(self, hidden_states):
         # inputs are concatenated output from all hidden layers
         # assume they come in L x state_size
 
@@ -131,10 +96,11 @@ class hmlstm(object):
         init_weights = np.random.rand(self.num_layers,
                                       self.state_size * self.num_layers)
         gate_weights = tf.Variable(init_weights, dtype=tf.float32)
-        col_inputs = tf.reshape(self.hidden_states,
+        col_inputs = tf.reshape(hidden_states,
                                 (self.num_layers * self.state_size, 1))
+
         gates = tf.sigmoid(tf.matmul(gate_weights, col_inputs))
-        gated = tf.multiply(gates, self.hidden_states)
+        gated = tf.multiply(gates, hidden_states)
 
         # embedding
         embedding_size = 100
@@ -163,90 +129,85 @@ class hmlstm(object):
         b3 = tf.Variable(np.random.rand(self.output_size, 1), dtype=tf.float32)
         w3 = tf.Variable(
             np.random.rand(self.output_size, hidden_size), dtype=tf.float32)
-        prediction = tf.nn.softmax(tf.matmul(w3, l2) + b3)
+
+        # the loss function used below
+        # sparce_softmax_cross_entropy_with_logits
+        # calls softmax, so we just pass the linear result through here
+        prediction = tf.matmul(w3, l2) + b3
         return tf.reshape(prediction, (self.output_size, 1))
 
+    def full_stack(self):
+        states = [[0] * self.num_layers] * self.num_batches
+        predictions = [0] * self.num_batches
+
+        # results are stored in the order: c, h, z
+        for t in range(self.batch_size):
+            for l in range(self.num_layers):
+                if l == 0:
+                    z_below = 1
+                    h_below = self.batch_input[t]
+                else:
+                    z_below = states[t][l - 1][2]
+                    h_below = states[t][l - 1][1]
+
+                if t == 0:
+                    c = tf.zeros([self.state_size, 1])
+                    h = tf.zeros([self.state_size, 1])
+                    h_above = tf.zeros([self.state_size, 1])
+                    z = 1
+                else:
+                    c = states[t - 1][l][0]
+                    h = states[t - 1][l][1]
+                    z = states[t - 1][l][2]
+
+                    if l != self.num_layers - 1:
+                        h_above = [t - 1][l + 1][1]
+                    else:
+                        h_above = tf.zeros([self.state_size, 1])
+
+                states[t][l] = self.hmlstm_layer(c, h, z, h_below, h_above,
+                                                 z_below)
+
+            hidden_states = tf.stack([h for c, h, z in states[t]])
+            predictions[t] = self.output_module(hidden_states)
+
+        losses = [
+            tf.nn.sparse_softmax_cross_entropy_with_logits(logits=p, labels=y)
+            for p, y in zip(predictions, self.batch_output)
+        ]
+
+        total_loss = tf.reduce_mean(losses)
+
+        return total_loss
 
     def run(self, signal, epochs=100):
         session = tf.Session()
         init = tf.global_variables_initializer()
         session.run(init)
 
-        for e in range(epochs):
-
-            # for first run
-            last_run = [(np.random.rand(self.state_size, 1), np.random.rand(
-                self.state_size, 1), 1.) for _ in self.layers]
-            current_run = [(np.random.rand(self.state_size, 1), np.random.rand(
-                self.state_size, 1), 1.) for _ in self.layers]
-
+        for epoch in range(epochs):
             step_size = 1
             batch_start = 0
             batch_end = self.batch_size
             while batch_end <= len(signal):
 
-                for t, s in enumerate(signal[batch_start:batch_end]):
-
-                    for i, l in enumerate(self.layers):
-                        # short circut copy operation
-                        if last_run[i][2] == 0. and current_run[i - 1][2] == 0.:
-                            current_run[i] = last_run[i]
-                            continue
-
-                        placeholders = self._get_placeholders(
-                            last_run, current_run, i, s, (e * len(signal)) + t)
-
-                        current_run[i] = session.run(l, placeholders)
-
-                    last_run = current_run
-
-                    hidden_states = np.array([h[1][:, 0] for h in current_run])
-
-                    loss = session.run([self.loss], {
-                        self.hidden_states: hidden_states,
-                        self.current_output: signal[t + 1].reshape(1, self.output_size)
+                loss = self.full_stack()
+                train = self.minimize_loss(loss)
+                _loss, _ = session.run(
+                    [loss, train],
+                    feed_dict={
+                        self.batch_input: signal[batch_start:batch_end],
+                        self.batch_output:
+                        signal[batch_start + 1:batch_end + 1],
+                        self.epoch: epoch,
                     })
-
-                    print(loss)
-                    session.run([self.train], {
-                        self.current_loss: loss,
-                    })
-
 
                 batch_start += step_size
                 batch_end = batch_start + self.batch_size
 
-    def calculate_loss(self):
-        return tf.losses.softmax_cross_entropy(self.current_output,
-                                               self.prediction)
-
-    def minimize_loss(self):
+    def minimize_loss(self, loss):
         optimizer = tf.train.GradientDescentOptimizer(0.5)
-        return optimizer.minimize(self.current_loss)
-
-    def _get_placeholders(self, last_run, current_run, i, s, iteration):
-        # for top layer, the hidden state from above is zero
-        if i == len(self.layers) - 1:
-            ha = np.zeros((self.state_size, 1))
-        else:
-            ha = last_run[i + 1][1]
-
-        # for bottom layer, input is signal
-        if i == 0:
-            hb = s.reshape(-1, 1)
-        else:
-            hb = current_run[i - 1][1]
-
-        placeholders = {
-            self.c: last_run[i][0],
-            self.h: last_run[i][1],
-            self.z: last_run[i][2],
-            self.h_below: hb,
-            self.h_above: ha,
-            self.z_below: 1 if i == 0 else current_run[i - 1][2],
-            self.iteration: iteration,
-        }
-        return placeholders
+        return optimizer.minimize(loss)
 
 
 def text():
@@ -280,6 +241,7 @@ def one_hot_encode(text):
         out[i, get_index(t)] = 1
 
     return out
+
 
 if __name__ == '__main__':
     y = text()

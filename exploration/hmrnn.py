@@ -1,4 +1,3 @@
-from itertools import chain
 from tensorflow.python.framework import ops
 from string import ascii_lowercase
 import tensorflow as tf
@@ -11,7 +10,7 @@ class hmlstm(object):
                  layers=3,
                  state_size=29,
                  batch_size=10,
-                 step_size=0,
+                 step_size=1,
                  output_size=29,
                  embedding_size=100,
                  out_hidden_size=200):
@@ -28,7 +27,7 @@ class hmlstm(object):
         # placeholders
         in_shape = (batch_size, output_size, 1)
         self.batch_input = tf.placeholder(tf.float32, shape=in_shape)
-        self.batch_output = tf.placeholder(tf.float32, shape=in_shape)
+        self.batch_output = tf.placeholder(tf.int32, shape=(self.batch_size))
         self.epoch = tf.placeholder(tf.float32, shape=())
 
         # output module variables
@@ -53,7 +52,7 @@ class hmlstm(object):
         # hmlstm layers variables
         weight_size = (state_size * 4) + 1
         self.b = [
-            tf.Variable(np.zeros((weight_size, 1)), dtype=tf.float32)
+            tf.Variable(np.ones((weight_size, 1)), dtype=tf.float32)
             for _ in range(layers)
         ]
 
@@ -74,12 +73,15 @@ class hmlstm(object):
         ]
 
         # hold predictions
-        self.predictions = tf.Variable(np.zeros((batch_size, output_size)),
-                                       dtype=tf.float32, trainable=False)
+        self.predictions = [
+            tf.Variable(
+                np.ones(output_size), dtype=tf.float32, trainable=False)
+            for _ in range(batch_size)
+        ]
 
         # generate graph
-        self.loss = self.full_stack()
-        self.train = self.minimize_loss(self.loss)
+        self.loss, self.last_c, self.last_h, self.last_z = self.full_stack()
+        # self.train = self.minimize_loss(self.loss)
 
     def hmlstm_layer(self, c, h, z, h_below, h_above, z_below, layer):
         # calculate LSTM-like gates
@@ -167,15 +169,14 @@ class hmlstm(object):
         # sparse_softmax_cross_entropy_with_logits
         # calls softmax, so we just pass the linear result through here
         prediction = tf.matmul(self.w3, l2) + self.b3
-        return tf.reshape(prediction, (self.output_size, 1))
+        return tf.reshape(prediction, [self.output_size])
 
     def full_stack(self):
         init_state = np.ones((self.state_size, 1))
         states = [[[
             tf.Variable(init_state, dtype=tf.float32, trainable=False),
-            tf.Variable(init_state, dtype=tf.float32,
-                        trainable=False), tf.Variable(
-                            1., dtype=tf.float32, trainable=False)
+            tf.Variable(init_state, dtype=tf.float32, trainable=False),
+            tf.Variable(1., dtype=tf.float32, trainable=False),
         ] for _ in range(self.num_layers)] for _ in range(self.batch_size)]
 
         # results are stored in the order: c, h, z
@@ -188,14 +189,14 @@ class hmlstm(object):
                 states[t][l][2] = tf.assign(states[t][l][2], z)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
-            self.predictions[t].assign(self.output_module(hidden_states))
+            prediction = self.output_module(hidden_states)
+            tf.assign(self.predictions[t], prediction)
 
-        loss = tf.nn.softmax_cross_entropy_with_logits(
-            logits=self.predictions,
-            labels=self.batch_input
-        )
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=self.batch_output, logits=tf.stack(self.predictions))
 
-        return tf.reduce_mean(loss)
+        last_c, last_h, last_z = states[-1][-1]
+        return tf.reduce_mean(loss), last_c, last_h, last_z
 
     def _get_hmlstm_args(self, t, l, states):
         if l == 0:
@@ -233,16 +234,25 @@ class hmlstm(object):
             while batch_end < len(signal):
                 batch_in = signal[batch_start:batch_end]
                 batch_in_shaped = batch_in.reshape(self.batch_size, -1, 1)
-                batch_out = signal[batch_start + 1:batch_end + 1]
-                batch_out_shaped = batch_out.reshape(self.batch_size, -1, 1)
+                batch_out = np.zeros(self.batch_size)
+                for i in range(self.batch_size):
+                    batch_out[i] = np.where(signal[i +
+                                                   batch_start + 1] == 1)[0][0]
 
-                _loss, _ = session.run(
-                    [self.loss, self.train],
+                _loss, _c, _h, _z, _predictions = session.run(
+                    [
+                        self.loss, self.last_c, self.last_h, self.last_z,
+                        self.predictions
+                    ],  #, self.train],
                     feed_dict={
                         self.batch_input: batch_in_shaped,
-                        self.batch_output: batch_out_shaped,
+                        self.batch_output: batch_out,
                         self.epoch: epoch,
                     })
+                print(_c)
+                print(_h)
+                print(_z)
+                print(_predictions)
                 print(_loss)
 
                 batch_start += self.step_size

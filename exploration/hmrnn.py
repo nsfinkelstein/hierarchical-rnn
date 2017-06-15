@@ -161,10 +161,11 @@ class hmlstm(object):
         return tf.reshape(prediction, (self.output_size, 1))
 
     def full_stack(self):
-        init_state = np.zeros(self.state_size)
+        init_state = np.zeros((self.state_size, 1))
         states = [[(tf.Variable(init_state, dtype=tf.float32, trainable=False),
                     tf.Variable(init_state, dtype=tf.float32, trainable=False),
-                    tf.Variable(1., dtype=tf.float32, trainable=False))]
+                    tf.Variable(1., dtype=tf.float32, trainable=False))
+                  for _ in range(self.num_layers)]
                   for _ in range(self.batch_size)]
 
         # results are stored in the order: c, h, z

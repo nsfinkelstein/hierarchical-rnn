@@ -179,7 +179,6 @@ class hmlstm(object):
         ] for _ in range(self.num_layers)] for _ in range(self.batch_size)]
 
         # results are stored in the order: c, h, z
-        total_loss = 0.0
         for t in range(self.batch_size):
             for l in range(self.num_layers):
                 args = self._get_hmlstm_args(t, l, states)
@@ -189,16 +188,14 @@ class hmlstm(object):
                 states[t][l][2] = tf.assign(states[t][l][2], z)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
-            prediction = self.output_module(hidden_states)
+            self.predictions[t].assign(self.output_module(hidden_states))
 
-            total_loss += tf.add(total_loss,
-                                 tf.nn.softmax_cross_entropy_with_logits(
-                                    logits=tf.reshape(prediction,
-                                                      [self.output_size]),
-                                    labels=tf.reshape(self.batch_output[t],
-                                                      [self.output_size])))
-            print(total_loss)
-        return total_loss
+        loss = tf.nn.softmax_cross_entropy_with_logits(
+            logits=self.predictions,
+            labels=self.batch_input
+        )
+
+        return tf.reduce_mean(loss)
 
     def _get_hmlstm_args(self, t, l, states):
         if l == 0:

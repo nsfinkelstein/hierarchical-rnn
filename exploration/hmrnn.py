@@ -1,3 +1,4 @@
+from itertools import chain
 from tensorflow.python.framework import ops
 from string import ascii_lowercase
 import tensorflow as tf
@@ -9,8 +10,8 @@ class hmlstm(object):
     def __init__(self,
                  layers=3,
                  state_size=29,
-                 batch_size=50,
-                 step_size=1,
+                 batch_size=10,
+                 step_size=0,
                  output_size=29,
                  embedding_size=100,
                  out_hidden_size=200):
@@ -27,7 +28,7 @@ class hmlstm(object):
         # placeholders
         in_shape = (batch_size, output_size, 1)
         self.batch_input = tf.placeholder(tf.float32, shape=in_shape)
-        self.batch_output = tf.placeholder(tf.int32, shape=(batch_size, 1))
+        self.batch_output = tf.placeholder(tf.float32, shape=in_shape)
         self.epoch = tf.placeholder(tf.float32, shape=())
 
         # output module variables
@@ -71,6 +72,14 @@ class hmlstm(object):
             tf.Variable(initialize_weights(), dtype=tf.float32)
             for _ in range(layers)
         ]
+
+        # hold predictions
+        self.predictions = tf.Variable(np.zeros((batch_size, output_size)),
+                                       dtype=tf.float32, trainable=False)
+
+        # generate graph
+        self.loss = self.full_stack()
+        self.train = self.minimize_loss(self.loss)
 
     def hmlstm_layer(self, c, h, z, h_below, h_above, z_below, layer):
         # calculate LSTM-like gates
@@ -161,30 +170,34 @@ class hmlstm(object):
         return tf.reshape(prediction, (self.output_size, 1))
 
     def full_stack(self):
-        init_state = np.zeros((self.state_size, 1))
-        states = [[(tf.Variable(init_state, dtype=tf.float32, trainable=False),
-                    tf.Variable(init_state, dtype=tf.float32, trainable=False),
-                    tf.Variable(1., dtype=tf.float32, trainable=False))
-                  for _ in range(self.num_layers)]
-                  for _ in range(self.batch_size)]
+        init_state = np.ones((self.state_size, 1))
+        states = [[[
+            tf.Variable(init_state, dtype=tf.float32, trainable=False),
+            tf.Variable(init_state, dtype=tf.float32,
+                        trainable=False), tf.Variable(
+                            1., dtype=tf.float32, trainable=False)
+        ] for _ in range(self.num_layers)] for _ in range(self.batch_size)]
 
         # results are stored in the order: c, h, z
-        total_loss = tf.constant(0.0)
+        total_loss = 0.0
         for t in range(self.batch_size):
             for l in range(self.num_layers):
                 args = self._get_hmlstm_args(t, l, states)
                 c, h, z = self.hmlstm_layer(*args)
-                tf.assign(states[t][l][0], c)
-                tf.assign(states[t][l][1], h)
-                tf.assign(states[t][l][2], z)
+                states[t][l][0] = tf.assign(states[t][l][0], c)
+                states[t][l][1] = tf.assign(states[t][l][1], h)
+                states[t][l][2] = tf.assign(states[t][l][2], z)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
             prediction = self.output_module(hidden_states)
-            logits = tf.reshape(prediction, (1, self.output_size))
-            total_loss = tf.add(total_loss,
-                                tf.nn.sparse_softmax_cross_entropy_with_logits(
-                                    logits=logits,
-                                    labels=self.batch_output[t]))
+
+            total_loss += tf.add(total_loss,
+                                 tf.nn.softmax_cross_entropy_with_logits(
+                                    logits=tf.reshape(prediction,
+                                                      [self.output_size]),
+                                    labels=tf.reshape(self.batch_output[t],
+                                                      [self.output_size])))
+            print(total_loss)
         return total_loss
 
     def _get_hmlstm_args(self, t, l, states):
@@ -213,34 +226,29 @@ class hmlstm(object):
         return c, h, z, h_below, h_above, z_below, l
 
     def run(self, signal, epochs=100):
-        loss = self.full_stack()
-        train = self.minimize_loss(loss)
-
         session = tf.Session()
         init = tf.global_variables_initializer()
         session.run(init)
 
         for epoch in range(epochs):
-            step_size = 1
             batch_start = 0
             batch_end = self.batch_size
             while batch_end < len(signal):
                 batch_in = signal[batch_start:batch_end]
                 batch_in_shaped = batch_in.reshape(self.batch_size, -1, 1)
-                batch_out = np.zeros((self.batch_size, 1))
-                for i, s in enumerate(signal[batch_start + 1:batch_end + 1]):
-                    batch_out[i, 0] = np.where(s == 1)[0][0]
+                batch_out = signal[batch_start + 1:batch_end + 1]
+                batch_out_shaped = batch_out.reshape(self.batch_size, -1, 1)
 
                 _loss, _ = session.run(
-                    [loss, train],
+                    [self.loss, self.train],
                     feed_dict={
                         self.batch_input: batch_in_shaped,
-                        self.batch_output: batch_out,
+                        self.batch_output: batch_out_shaped,
                         self.epoch: epoch,
                     })
                 print(_loss)
 
-                batch_start += step_size
+                batch_start += self.step_size
                 batch_end = batch_start + self.batch_size
 
     def minimize_loss(self, loss):

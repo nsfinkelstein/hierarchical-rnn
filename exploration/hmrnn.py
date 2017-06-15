@@ -101,22 +101,22 @@ class hmlstm(object):
         # calculate new cell and hidden states
         new_c, new_h = tf.case(
             [
-                (tf.equal(z, tf.constant(1, dtype=tf.float32)), flush),
+                (tf.equal(z, tf.constant(1., dtype=tf.float32)), flush),
                 (tf.logical_and(
-                    tf.equal(z, tf.constant(0, dtype=tf.float32)),
-                    tf.equal(z_below, tf.constant(0, dtype=tf.float32))),
+                    tf.equal(z, tf.constant(0., dtype=tf.float32)),
+                    tf.equal(z_below, tf.constant(0., dtype=tf.float32))),
                  copy),
                 (tf.logical_and(
-                    tf.equal(z, tf.constant(0, dtype=tf.float32)),
-                    tf.equal(z_below, tf.constant(1, dtype=tf.float32))),
+                    tf.equal(z, tf.constant(0., dtype=tf.float32)),
+                    tf.equal(z_below, tf.constant(1., dtype=tf.float32))),
                  update),
             ],
             default=update,
             exclusive=True)
 
         # use slope annealing trick
-        slope_multiplier = tf.maximum(tf.constant(.02) + self.epoch,
-                                      tf.constant(5.))
+        slope_multiplier = tf.maximum(
+            tf.constant(.02) + self.epoch, tf.constant(5.))
         z_tilde = tf.sigmoid(joint_input[-1:] * slope_multiplier)
 
         # replace gradient calculation - use straight-through estimator
@@ -161,14 +161,21 @@ class hmlstm(object):
         return tf.reshape(prediction, (self.output_size, 1))
 
     def full_stack(self):
-        states = [[0] * self.num_layers] * self.batch_size
+        init_state = np.zeros(self.state_size)
+        states = [[(tf.Variable(init_state, dtype=tf.float32, trainable=False),
+                    tf.Variable(init_state, dtype=tf.float32, trainable=False),
+                    tf.Variable(1., dtype=tf.float32, trainable=False))]
+                  for _ in range(self.batch_size)]
 
         # results are stored in the order: c, h, z
         total_loss = tf.constant(0.0)
         for t in range(self.batch_size):
             for l in range(self.num_layers):
                 args = self._get_hmlstm_args(t, l, states)
-                states[t][l] = self.hmlstm_layer(*args)
+                c, h, z = self.hmlstm_layer(*args)
+                tf.assign(states[t][l][0], c)
+                tf.assign(states[t][l][1], h)
+                tf.assign(states[t][l][2], z)
 
             hidden_states = tf.stack([h for c, h, z in states[t]])
             prediction = self.output_module(hidden_states)
@@ -205,12 +212,12 @@ class hmlstm(object):
         return c, h, z, h_below, h_above, z_below, l
 
     def run(self, signal, epochs=100):
+        loss = self.full_stack()
+        train = self.minimize_loss(loss)
+
         session = tf.Session()
         init = tf.global_variables_initializer()
         session.run(init)
-
-        loss = self.full_stack()
-        train = self.minimize_loss(loss)
 
         for epoch in range(epochs):
             step_size = 1

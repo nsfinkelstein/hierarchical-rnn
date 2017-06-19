@@ -246,6 +246,10 @@ class MultiHMLSTMNetwork(object):
             gated_input = tf.concat(gated_list, axis=1)
         return gated_input
 
+    def create_regression_module():
+        with vs.variable_scope('regression_output_module', reuse=True):
+            pass
+
     def create_output_module(self, gated_input, time_step):
         with vs.variable_scope('output_module', reuse=True):
 
@@ -280,7 +284,8 @@ class MultiHMLSTMNetwork(object):
             prediction = tf.matmul(l2, w3) + b3
 
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=self.batch_out[:, time_step], logits=prediction)
+                labels=self.batch_out[:, time_step], logits=prediction
+            )
         return tf.reduce_mean(loss)
 
     def create_network(self, output_module):
@@ -294,6 +299,7 @@ class MultiHMLSTMNetwork(object):
         h_aboves = tf.zeros(
             [self._batch_size, 1, (self._num_layers * self._num_units)])
         loss = 0.0
+
         for i in range(self._truncate_len):
             inputs = array_ops.concat(
                 (self.batch_in[:, i:(i + 1)], h_aboves), axis=2)
@@ -308,13 +314,13 @@ class MultiHMLSTMNetwork(object):
                 axis=1)
             h_aboves = tf.expand_dims(h_aboves, 1)
 
-            loss += output_module(
-                self.gate_input(array_ops.concat(hidden_states, axis=1)), i)
+            gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
+            loss += output_module(gated, i)
 
-        train = tf.train.AdamOptimizer(1e-4).minimize(loss)
+        train = tf.train.AdagradOptimizer(1e-4).minimize(loss)
         return train, loss
 
-    def run(self, batches_in, batches_out, epochs=3):
+    def run(self, batches_in, batches_out, epochs=10):
         with tf.Session() as sess:
             init = tf.global_variables_initializer()
             sess.run(init)
@@ -329,19 +335,19 @@ class MultiHMLSTMNetwork(object):
                             char = np.where(batch_out[b][i] == 1)[0][0]
                             sparse_batch_out[b, i] = char
 
-                    _train, _loss = sess.run([ self.train, self.loss ], {
+                    _, _loss = sess.run([self.train, self.loss], {
                         self.batch_in: batch_in,
                         self.batch_out: sparse_batch_out,
                     })
                     print(_loss)
 
-
 from string import ascii_lowercase
 import re
 import numpy as np
 
+num_batches = 10000
 batch_size = 10
-truncate_len = 3
+truncate_len = 5
 
 def text():
     signals = load_text()
@@ -357,10 +363,12 @@ def load_text():
         text = re.sub(' +', ' ', text)
 
     signals = []
-    for i in range(0, 50 * 100, 50):
-        intext = text[i:i + truncate_len]
-        outtext = text[i + 1:i + truncate_len + 1]
+    start = 0
+    for _ in range(num_batches * batch_size):
+        intext = text[start:start + truncate_len]
+        outtext = text[start + 1:start + truncate_len + 1]
         signals.append((intext, outtext))
+        start += truncate_len
 
     return signals
 
@@ -389,12 +397,14 @@ def run_everything():
     y = text()
     batches_in = []
     batches_out = []
-    network = MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
-    for batch_number in range(10):
+
+    for batch_number in range(num_batches):
         start = batch_number * batch_size
         end = (1 + batch_number) * batch_size
         batches_in.append([i for i, _ in y[start:end]])
         batches_out.append([o for _, o in y[start:end]])
+
+    network = MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
     network.run(batches_in, batches_out)
 
 

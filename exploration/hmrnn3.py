@@ -45,9 +45,12 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         length = 4 * self._num_units + 1
         states = [s_recurrent, s_above, s_below]
-        concat = rnn_cell_impl._linear(states, length, bias=True,
-                                       bias_initializer=tf.random_normal_initializer,
-                                       kernel_initializer=tf.random_normal_initializer)
+        concat = rnn_cell_impl._linear(
+            states,
+            length,
+            bias=True,
+            bias_initializer=tf.random_normal_initializer,
+            kernel_initializer=tf.random_normal_initializer)
 
         gate_splits = tf.constant(
             ([self._num_units] * 4) + [1], dtype=tf.int32)
@@ -187,6 +190,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
 class MultiHMLSTMNetwork(object):
     def __init__(self, batch_size, num_layers, truncate_len, num_units):
+        self.out_hidden_size = out_hidden_size = 100
+        self.embed_size = embed_size = 100
         self._batch_size = batch_size
         self._num_layers = num_layers
         self._truncate_len = truncate_len
@@ -198,6 +203,25 @@ class MultiHMLSTMNetwork(object):
 
         self.batch_out = tf.placeholder(
             tf.int32, shape=[batch_size, truncate_len], name='batch_out')
+
+        with vs.variable_scope('gates'):
+            for l in range(self._num_layers):
+                vs.get_variable(
+                    'gate_%s' % l, [self._num_units * self._num_layers, 1],
+                    dtype=tf.float32)
+
+        with vs.variable_scope('output_module'):
+            vs.get_variable('b1', [1, out_hidden_size], dtype=tf.float32)
+            vs.get_variable('b2', [1, out_hidden_size], dtype=tf.float32)
+            vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
+            vs.get_variable(
+                'w1', [embed_size, out_hidden_size], dtype=tf.float32)
+            vs.get_variable(
+                'w2', [out_hidden_size, out_hidden_size], dtype=tf.float32)
+            vs.get_variable(
+                'w3', [out_hidden_size, self._num_units], dtype=tf.float32)
+            embed_shape = [num_layers * num_units, self.embed_size]
+            vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
         self.train, self.loss = self.create_network(self.create_output_module)
 
@@ -223,24 +247,22 @@ class MultiHMLSTMNetwork(object):
         return gated_input
 
     def create_output_module(self, gated_input, time_step):
-        embed_size = 100
-        out_hidden_size = 100
-        with vs.variable_scope('output_module'):
+        with vs.variable_scope('output_module', reuse=True):
 
             in_size = self._num_layers * self._num_units
-            embed_shape = [in_size, embed_size]
+            embed_shape = [in_size, self.embed_size]
             embed_weights = vs.get_variable(
                 'embed_weights', embed_shape, dtype=tf.float32)
 
-            b1 = vs.get_variable('b1', [1, out_hidden_size], dtype=tf.float32)
-            b2 = vs.get_variable('b2', [1, out_hidden_size], dtype=tf.float32)
+            b1 = vs.get_variable('b1', [1, self.out_hidden_size], dtype=tf.float32)
+            b2 = vs.get_variable('b2', [1, self.out_hidden_size], dtype=tf.float32)
             b3 = vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
             w1 = vs.get_variable(
-                'w1', [embed_size, out_hidden_size], dtype=tf.float32)
+                'w1', [self.embed_size, self.out_hidden_size], dtype=tf.float32)
             w2 = vs.get_variable(
-                'w2', [out_hidden_size, out_hidden_size], dtype=tf.float32)
+                'w2', [self.out_hidden_size, self.out_hidden_size], dtype=tf.float32)
             w3 = vs.get_variable(
-                'w3', [out_hidden_size, self._num_units], dtype=tf.float32)
+                'w3', [self.out_hidden_size, self._num_units], dtype=tf.float32)
 
             # embedding
             prod = tf.matmul(gated_input, embed_weights)
@@ -259,12 +281,14 @@ class MultiHMLSTMNetwork(object):
 
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=self.batch_out[:, time_step], logits=prediction)
-        return loss
+        return tf.reduce_mean(loss)
 
     def create_network(self, output_module):
         def hmlstm_cell():
             return HMLSTMCell(self._num_units, self._batch_size)
-        hmlstm = MultiHMLSTMCell([hmlstm_cell() for _ in range(self._num_layers)])
+
+        hmlstm = MultiHMLSTMCell(
+            [hmlstm_cell() for _ in range(self._num_layers)])
 
         state = hmlstm.zero_state(self._batch_size, tf.float32)
         h_aboves = tf.zeros(
@@ -290,14 +314,26 @@ class MultiHMLSTMNetwork(object):
         train = tf.train.AdamOptimizer(1e-4).minimize(loss)
         return train, loss
 
-    def run(self, batches_in, batches_out):
-        for batch_in, batch_out in zip(batches_in, batches_out):
-            with tf.Session() as sess:
-                _train, _loss = sess.run(self.train, self.loss, {
-                    self.batch_in: batch_in,
-                    self.batch_out: batch_out,
-                })
-            print(_loss)
+    def run(self, batches_in, batches_out, epochs=3):
+        with tf.Session() as sess:
+            init = tf.global_variables_initializer()
+            sess.run(init)
+
+            for epoch in range(epochs):
+                print('new epoch')
+                for batch_in, batch_out in zip(batches_in, batches_out):
+
+                    sparse_batch_out = np.zeros((self._batch_size, self._truncate_len))
+                    for b in range(self._batch_size):
+                        for i in range(self._truncate_len):
+                            char = np.where(batch_out[b][i] == 1)[0][0]
+                            sparse_batch_out[b, i] = char
+
+                    _train, _loss = sess.run([ self.train, self.loss ], {
+                        self.batch_in: batch_in,
+                        self.batch_out: sparse_batch_out,
+                    })
+                    print(_loss)
 
 
 from string import ascii_lowercase
@@ -305,13 +341,10 @@ import re
 import numpy as np
 
 batch_size = 10
-truncate_len = 100
-
+truncate_len = 3
 
 def text():
-    text = load_text()
-    text = text.replace('\n', ' ')
-    signals = re.sub(' +', ' ', text)
+    signals = load_text()
 
     return [(one_hot_encode(intext), one_hot_encode(outtext))
             for intext, outtext in signals]
@@ -320,6 +353,8 @@ def text():
 def load_text():
     with open('text.txt', 'r') as f:
         text = f.read()
+        text = text.replace('\n', ' ')
+        text = re.sub(' +', ' ', text)
 
     signals = []
     for i in range(0, 50 * 100, 50):
@@ -351,10 +386,10 @@ def one_hot_encode(text):
 
 
 def run_everything():
-    network = MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
     y = text()
     batches_in = []
     batches_out = []
+    network = MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
     for batch_number in range(10):
         start = batch_number * batch_size
         end = (1 + batch_number) * batch_size

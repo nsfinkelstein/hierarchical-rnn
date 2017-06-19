@@ -246,10 +246,6 @@ class MultiHMLSTMNetwork(object):
             gated_input = tf.concat(gated_list, axis=1)
         return gated_input
 
-    def create_regression_module():
-        with vs.variable_scope('regression_output_module', reuse=True):
-            pass
-
     def create_output_module(self, gated_input, time_step):
         with vs.variable_scope('output_module', reuse=True):
 
@@ -282,11 +278,13 @@ class MultiHMLSTMNetwork(object):
             # the loss function used below
             # sparse_softmax_cross_entropy_with_logits
             prediction = tf.matmul(l2, w3) + b3
+            tf.summary.scalar('prediction', tf.reduce_sum(prediction))
 
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=self.batch_out[:, time_step], logits=prediction
+                labels=self.batch_out[:, time_step], logits=prediction,
+                name='loss'
             )
-        return tf.reduce_mean(loss)
+        return tf.reduce_mean(loss, name='loss_mean')
 
     def create_network(self, output_module):
         def hmlstm_cell():
@@ -296,13 +294,13 @@ class MultiHMLSTMNetwork(object):
             [hmlstm_cell() for _ in range(self._num_layers)])
 
         state = hmlstm.zero_state(self._batch_size, tf.float32)
-        h_aboves = tf.zeros(
-            [self._batch_size, 1, (self._num_layers * self._num_units)])
-        loss = 0.0
+        ha_shape = [self._batch_size, 1, (self._num_layers * self._num_units)]
+        h_aboves = tf.zeros(ha_shape)
 
+        losses = []
         for i in range(self._truncate_len):
             inputs = array_ops.concat(
-                (self.batch_in[:, i:(i + 1)], h_aboves), axis=2)
+                (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
 
             hidden_states, state = hmlstm(inputs, state)
             concated_hs = array_ops.concat(hidden_states[1:], axis=1)
@@ -315,12 +313,14 @@ class MultiHMLSTMNetwork(object):
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
-            loss += output_module(gated, i)
+            losses.append(output_module(gated, i))
 
-        train = tf.train.AdagradOptimizer(1e-4).minimize(loss)
+        loss = tf.reduce_mean(tf.stack(losses))
+        train = tf.train.AdagradOptimizer(1e-5).minimize(loss)
         return train, loss
 
     def run(self, batches_in, batches_out, epochs=10):
+        writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
         with tf.Session() as sess:
             init = tf.global_variables_initializer()
             sess.run(init)
@@ -333,12 +333,16 @@ class MultiHMLSTMNetwork(object):
                     for b in range(self._batch_size):
                         for i in range(self._truncate_len):
                             char = np.where(batch_out[b][i] == 1)[0][0]
-                            sparse_batch_out[b, i] = char
+                            sparse_batch_out[b, i] = int(char)
 
-                    _, _loss = sess.run([self.train, self.loss], {
+                    summary_ops = tf.summary.merge_all()
+                    _, _loss, _summary = sess.run(
+                        [self.train, self.loss, summary_ops], {
                         self.batch_in: batch_in,
                         self.batch_out: sparse_batch_out,
                     })
+                    writer.add_summary(_summary)
+                    print(_summary)
                     print(_loss)
 
 from string import ascii_lowercase
@@ -348,6 +352,7 @@ import numpy as np
 num_batches = 10000
 batch_size = 10
 truncate_len = 5
+
 
 def text():
     signals = load_text()
@@ -393,7 +398,7 @@ def one_hot_encode(text):
     return out
 
 
-def run_everything():
+def prepare_inputs():
     y = text()
     batches_in = []
     batches_out = []
@@ -403,9 +408,17 @@ def run_everything():
         end = (1 + batch_number) * batch_size
         batches_in.append([i for i, _ in y[start:end]])
         batches_out.append([o for _, o in y[start:end]])
+    return (batches_in, batches_out)
 
-    network = MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
-    network.run(batches_in, batches_out)
+
+def get_network():
+    return MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
+
+
+def run_everything():
+    inputs = prepare_inputs()
+    network = get_network()
+    network.run(*inputs)
 
 
 if __name__ == '__main__':

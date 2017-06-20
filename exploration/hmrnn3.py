@@ -5,6 +5,11 @@ from tensorflow.python.ops import variable_scope as vs
 import tensorflow as tf
 import collections
 
+num_batches = 10000
+batch_size = 2
+truncate_len = 5
+
+
 HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
 
 
@@ -45,10 +50,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         length = 4 * self._num_units + 1
         states = [s_recurrent, s_above, s_below]
-        concat = rnn_cell_impl._linear(
-            states,
-            length,
-            bias=True,)
+        concat = rnn_cell_impl._linear(states, length, bias=True)
 
         gate_splits = tf.constant(
             ([self._num_units] * 4) + [1], dtype=tf.int32)
@@ -62,6 +64,10 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
         new_state = HMLSTMState(new_c, new_h, new_z)
+
+        # # NOTE: For debugging
+        # new_state = HMLSTMState(ha, hb, zb)
+
         return output, new_state
 
     def calculate_new_cell_state(self, c, g, i, f, z, zb):
@@ -124,15 +130,18 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return tf.stack(new_h, axis=0)
 
     def calculate_new_indicator(self, z_tilde):
+        for i in range(batch_size):
+            tf.summary.scalar('z_tilde' + str(i), tf.squeeze(z_tilde[i]))
         # use slope annealing trick
         slope_multiplier = 1  # tf.maximum(tf.constant(.02) + self.epoch, tf.constant(5.))
+        sigmoided = tf.sigmoid(z_tilde) * slope_multiplier
 
         # replace gradient calculation - use straight-through estimator
         # see: https://r2rt.com/binary-stochastic-neurons-in-tensorflow.html
         graph = tf.get_default_graph()
         with ops.name_scope('BinaryRound') as name:
             with graph.gradient_override_map({'Round': 'Identity'}):
-                new_z = tf.round(z_tilde, name=name)
+                new_z = tf.round(sigmoided, name=name)
 
         return tf.squeeze(new_z)
 
@@ -221,7 +230,9 @@ class MultiHMLSTMNetwork(object):
             embed_shape = [num_layers * num_units, self.embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
-        self.train, self.loss, self.indicators = self.create_network(self.create_output_module)
+        self.train, self.loss, self.indicators = self.create_network(
+            self.create_output_module
+        )
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
@@ -282,7 +293,6 @@ class MultiHMLSTMNetwork(object):
             # the loss function used below
             # softmax_cross_entropy_with_logits
             prediction = tf.matmul(l2, w3) + b3
-            tf.summary.tensor_summary('prediction', prediction)
 
             loss = tf.nn.softmax_cross_entropy_with_logits(
                 labels=self.batch_out[:, time_step:time_step + 1, :],
@@ -290,7 +300,6 @@ class MultiHMLSTMNetwork(object):
                 name='loss'
             )
             scalar_loss = tf.reduce_mean(loss, name='loss_mean')
-            tf.summary.scalar('loss', scalar_loss)
         return scalar_loss, prediction
 
     def create_network(self, output_module):
@@ -324,7 +333,7 @@ class MultiHMLSTMNetwork(object):
             new_loss, new_prediction = output_module(gated, i)
             loss += tf.reduce_mean(new_loss)
 
-            indicators += [z for _, _, z in state]
+            indicators += [h for c, h, z in state]
 
         train = tf.train.AdamOptimizer(1e-3).minimize(loss)
         return train, loss, indicators
@@ -340,19 +349,16 @@ class MultiHMLSTMNetwork(object):
                 print('new epoch')
                 for batch_in, batch_out in zip(batches_in, batches_out):
                     _results = sess.run(
-                        [self.train, self.loss] + self.indicators, {
+                        [summary_ops, self.train, self.loss] + self.indicators, {
                         self.batch_in: batch_in,
                         self.batch_out: batch_out,
                     })
+                    writer.add_summary(_results[0])
                     print(_results)
 
 from string import ascii_lowercase
 import re
 import numpy as np
-
-num_batches = 100
-batch_size = 10
-truncate_len = 10
 
 def text():
     signals = load_text()

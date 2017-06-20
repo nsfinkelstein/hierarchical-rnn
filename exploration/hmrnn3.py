@@ -349,9 +349,9 @@ from string import ascii_lowercase
 import re
 import numpy as np
 
-num_batches = 10000
+num_batches = 100
 batch_size = 10
-truncate_len = 5
+truncate_len = 100
 
 
 def text():
@@ -362,10 +362,12 @@ def text():
 
 
 def load_text():
-    with open('text.txt', 'r') as f:
-        text = f.read()
-        text = text.replace('\n', ' ')
-        text = re.sub(' +', ' ', text)
+    # with open('text.txt', 'r') as f:
+    #     text = f.read()
+    #     text = text.replace('\n', ' ')
+    #     text = re.sub(' +', ' ', text)
+
+    text = 'abcdefghijklmnopqrstuvwxyz' * 1000000
 
     signals = []
     start = 0
@@ -422,4 +424,5 @@ def run_everything():
 
 
 if __name__ == '__main__':
+    # TODO: Check to make sure the batch inputs are correct
     run_everything()

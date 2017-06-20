@@ -11,6 +11,7 @@ class HMLSTMNetwork(object):
                  num_layers,
                  truncate_len,
                  num_units,
+                 task='classification',
                  save_path='./hmlstm.ckpt'):
         self._out_hidden_size = 100
         self._embed_size = 100
@@ -19,6 +20,15 @@ class HMLSTMNetwork(object):
         self._truncate_len = truncate_len
         self._num_units = num_units  # the length of c and h
         self._save_path = save_path
+
+        if task == 'classification':
+            self._loss_function = tf.nn.softmax_cross_entropy_with_logits
+            self._output_size = self._num_units
+        elif task == 'regression':
+            self._loss_function = tf.losses.mean_pairwise_squared_error
+            self._out = 1
+        else:
+            raise ValueError('Not a valid task')
 
         batch_shape = (batch_size, truncate_len, num_units)
         self.batch_in = tf.placeholder(
@@ -31,7 +41,7 @@ class HMLSTMNetwork(object):
         self._initialize_embedding_variables()
 
         self.optim, self.loss, self.indicators, self.predictions = self.create_network(
-            self.classification_output_module)
+            self.output_module)
 
     def _initialize_gate_variables(self):
         with vs.variable_scope('gates'):
@@ -59,7 +69,7 @@ class HMLSTMNetwork(object):
                 'w2', [self._out_hidden_size, self._out_hidden_size],
                 dtype=tf.float32)
             vs.get_variable(
-                'w3', [self._out_hidden_size, self._num_units],
+                'w3', [self._out_hidden_size, self._output_size],
                 dtype=tf.float32)
 
     def gate_input(self, hidden_states):
@@ -96,25 +106,14 @@ class HMLSTMNetwork(object):
 
         return embedding
 
-    def regression_output_module(self, gated_input, time_step):
-        pass
-
-    def classification_output_module(self, embedding, time_step):
+    def output_module(self, embedding, time_step):
         with vs.variable_scope('output_module', reuse=True):
-            b1 = vs.get_variable(
-                'b1', [1, self._out_hidden_size], dtype=tf.float32)
-            b2 = vs.get_variable(
-                'b2', [1, self._out_hidden_size], dtype=tf.float32)
-            b3 = vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
-            w1 = vs.get_variable(
-                'w1', [self._embed_size, self._out_hidden_size],
-                dtype=tf.float32)
-            w2 = vs.get_variable(
-                'w2', [self._out_hidden_size, self._out_hidden_size],
-                dtype=tf.float32)
-            w3 = vs.get_variable(
-                'w3', [self._out_hidden_size, self._num_units],
-                dtype=tf.float32)
+            b1 = vs.get_variable('b1')
+            b2 = vs.get_variable('b2')
+            b3 = vs.get_variable('b3')
+            w1 = vs.get_variable('w1')
+            w2 = vs.get_variable('w2')
+            w3 = vs.get_variable('w3')
 
             # feed forward network
             # first layer
@@ -127,7 +126,7 @@ class HMLSTMNetwork(object):
             # softmax_cross_entropy_with_logits
             prediction = tf.matmul(l2, w3) + b3
 
-            loss = tf.nn.softmax_cross_entropy_with_logits(
+            loss = self._loss_function(
                 labels=self.batch_out[:, time_step:time_step + 1, :],
                 logits=prediction,
                 name='loss')

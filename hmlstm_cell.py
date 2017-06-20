@@ -125,8 +125,6 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return tf.stack(new_h, axis=0)
 
     def calculate_new_indicator(self, z_tilde):
-        for i in range(batch_size):
-            tf.summary.scalar('z_tilde' + str(i), tf.squeeze(z_tilde[i]))
         # use slope annealing trick
         slope_multiplier = 1  # tf.maximum(tf.constant(.02) + self.epoch, tf.constant(5.))
         sigmoided = tf.sigmoid(z_tilde) * slope_multiplier

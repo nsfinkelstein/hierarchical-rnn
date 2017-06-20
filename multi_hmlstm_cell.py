@@ -53,4 +53,3 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
         hidden_states = [ns[1] for ns in new_states]
         return hidden_states, tuple(new_states)
-

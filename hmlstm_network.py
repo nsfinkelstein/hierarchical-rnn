@@ -1,5 +1,5 @@
-from .hmlstm_cell import HMLSTMCell
-from .multi_hmlstm_cell import MultiHMLSTMCell
+from hmlstm_cell import HMLSTMCell
+from multi_hmlstm_cell import MultiHMLSTMCell
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variable_scope as vs
 import tensorflow as tf

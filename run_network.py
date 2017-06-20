@@ -1,5 +1,5 @@
-from .hmlstm_network import HMLSTMNetwork
-from .text_input_utils import prepare_inputs
+from hmlstm_network import HMLSTMNetwork
+from text_input_utils import prepare_inputs
 
 
 def get_network(batch_size, truncate_len):

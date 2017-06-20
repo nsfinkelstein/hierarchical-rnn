@@ -350,16 +350,15 @@ from string import ascii_lowercase
 import re
 import numpy as np
 
-num_batches = 2
-batch_size = 2
+num_batches = 100
+batch_size = 10
 truncate_len = 10
-
 
 def text():
     signals = load_text()
     print(signals)
     hot = [(one_hot_encode(intext), one_hot_encode(outtext))
-            for intext, outtext in signals]
+           for intext, outtext in signals]
     return hot
 
 
@@ -369,11 +368,11 @@ def load_text():
     #     text = text.replace('\n', ' ')
     #     text = re.sub(' +', ' ', text)
 
-    text = 'abcdefghijklmnopqrstuvwxyz' * 1000000
+    text = 'abcdefghijklmnopqrstuvwxyz' * 100000000
 
     signals = []
     start = 0
-    for _ in range(batch_size * truncate_len):
+    for _ in range(batch_size * num_batches):
         intext = text[start:start + truncate_len]
         outtext = text[start + 1:start + truncate_len + 1]
         signals.append((intext, outtext))

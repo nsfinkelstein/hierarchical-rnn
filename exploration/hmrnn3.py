@@ -221,7 +221,7 @@ class MultiHMLSTMNetwork(object):
             embed_shape = [num_layers * num_units, self.embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
-        self.train, self.loss, self.predictions = self.create_network(self.create_output_module)
+        self.train, self.loss, self.indicators = self.create_network(self.create_output_module)
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
@@ -305,7 +305,7 @@ class MultiHMLSTMNetwork(object):
         h_aboves = tf.zeros(ha_shape)
 
         loss = tf.constant(0.0)
-        predictions = []
+        indicators = []
         for i in range(self._truncate_len):
             inputs = array_ops.concat(
                 (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
@@ -323,10 +323,11 @@ class MultiHMLSTMNetwork(object):
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
             new_loss, new_prediction = output_module(gated, i)
             loss += tf.reduce_mean(new_loss)
-            predictions.append(h_aboves)
+
+            indicators += [z for _, _, z in state]
 
         train = tf.train.AdamOptimizer(1e-3).minimize(loss)
-        return train, loss, predictions
+        return train, loss, indicators
 
     def run(self, batches_in, batches_out, epochs=10):
         writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
@@ -338,31 +339,12 @@ class MultiHMLSTMNetwork(object):
             for epoch in range(epochs):
                 print('new epoch')
                 for batch_in, batch_out in zip(batches_in, batches_out):
-
-                    # print(batch_in)
-                    # print(batch_out)
-                    
-                    # i, o = sess.run([self.batch_in, self.batch_out], {
-                    #     self.batch_in: batch_in,
-                    #     self.batch_out: batch_out,
-                    # })
-                    # print(i, o)
-                    # stop
-
-                    # _predictions = sess.run([self.predictions], {
-                    #     self.batch_in: batch_in,
-                    #     self.batch_out: batch_out,
-                    # })
-                    # print(_predictions)
-                    # stop
-
-                    _, _loss, _summary = sess.run(
-                        [self.train, self.loss, summary_ops], {
+                    _results = sess.run(
+                        [self.train, self.loss] + self.indicators, {
                         self.batch_in: batch_in,
                         self.batch_out: batch_out,
                     })
-                    writer.add_summary(_summary)
-                    print(_loss)
+                    print(_results)
 
 from string import ascii_lowercase
 import re

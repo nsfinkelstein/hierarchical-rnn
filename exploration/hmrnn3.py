@@ -10,7 +10,6 @@ num_batches = 10
 batch_size = 2
 truncate_len = 10
 
-
 HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
 
 
@@ -42,7 +41,10 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         in_splits = tf.constant([self._num_units, 1, self._num_units])
         hb, zb, ha = array_ops.split(
-            value=inputs, num_or_size_splits=in_splits, axis=2, name='split_input')
+            value=inputs,
+            num_or_size_splits=in_splits,
+            axis=2,
+            name='split_input')
 
         s_recurrent = h
         expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
@@ -171,8 +173,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
         # split out the part of the input that stores values of ha
         raw_h_aboves = inputs[:, :, -sum(c._num_units for c in self._cells):]
-        h_aboves = array_ops.split(value=raw_h_aboves,
-                                   num_or_size_splits=len(self._cells), axis=2)
+        h_aboves = array_ops.split(
+            value=raw_h_aboves, num_or_size_splits=len(self._cells), axis=2)
 
         z_below = tf.ones([tf.shape(inputs)[0], 1, 1])
 
@@ -184,7 +186,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
                 cur_state = state[i]
 
                 print(i)
-                cur_inp = array_ops.concat([raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
+                cur_inp = array_ops.concat(
+                    [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
                 raw_inp, new_state = cell(cur_inp, cur_state)
                 raw_inp = tf.expand_dims(raw_inp, 1)
                 new_states.append(new_state)
@@ -194,7 +197,12 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
 
 class MultiHMLSTMNetwork(object):
-    def __init__(self, batch_size, num_layers, truncate_len, num_units, save_path='./hmlstm.ckpt'):
+    def __init__(self,
+                 batch_size,
+                 num_layers,
+                 truncate_len,
+                 num_units,
+                 save_path='./hmlstm.ckpt'):
         self._out_hidden_size = 100
         self._embed_size = 100
         self._batch_size = batch_size
@@ -204,8 +212,10 @@ class MultiHMLSTMNetwork(object):
         self._save_path = save_path
 
         batch_shape = (batch_size, truncate_len, num_units)
-        self.batch_in = tf.placeholder(tf.float32, shape=batch_shape, name='batch_in')
-        self.batch_out = tf.placeholder(tf.int32, shape=batch_shape, name='batch_out')
+        self.batch_in = tf.placeholder(
+            tf.float32, shape=batch_shape, name='batch_in')
+        self.batch_out = tf.placeholder(
+            tf.int32, shape=batch_shape, name='batch_out')
 
         self._initialize_output_variables()
         self._initialize_gate_variables()
@@ -226,12 +236,17 @@ class MultiHMLSTMNetwork(object):
             vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
             vs.get_variable(
-                'w1', [self._embed_size, self._out_hidden_size], dtype=tf.float32)
+                'w1', [self._embed_size, self._out_hidden_size],
+                dtype=tf.float32)
             vs.get_variable(
-                'w2', [self._out_hidden_size, self._out_hidden_size], dtype=tf.float32)
+                'w2', [self._out_hidden_size, self._out_hidden_size],
+                dtype=tf.float32)
             vs.get_variable(
-                'w3', [self._out_hidden_size, self._num_units], dtype=tf.float32)
-            embed_shape = [self._num_layers * self._num_units, self._embed_size]
+                'w3', [self._out_hidden_size, self._num_units],
+                dtype=tf.float32)
+            embed_shape = [
+                self._num_layers * self._num_units, self._embed_size
+            ]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
     def gate_input(self, hidden_states):
@@ -263,15 +278,20 @@ class MultiHMLSTMNetwork(object):
             embed_weights = vs.get_variable(
                 'embed_weights', embed_shape, dtype=tf.float32)
 
-            b1 = vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
-            b2 = vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
+            b1 = vs.get_variable(
+                'b1', [1, self._out_hidden_size], dtype=tf.float32)
+            b2 = vs.get_variable(
+                'b2', [1, self._out_hidden_size], dtype=tf.float32)
             b3 = vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
             w1 = vs.get_variable(
-                'w1', [self._embed_size, self._out_hidden_size], dtype=tf.float32)
+                'w1', [self._embed_size, self._out_hidden_size],
+                dtype=tf.float32)
             w2 = vs.get_variable(
-                'w2', [self._out_hidden_size, self._out_hidden_size], dtype=tf.float32)
+                'w2', [self._out_hidden_size, self._out_hidden_size],
+                dtype=tf.float32)
             w3 = vs.get_variable(
-                'w3', [self._out_hidden_size, self._num_units], dtype=tf.float32)
+                'w3', [self._out_hidden_size, self._num_units],
+                dtype=tf.float32)
 
             # embedding
             prod = tf.matmul(gated_input, embed_weights)
@@ -291,8 +311,7 @@ class MultiHMLSTMNetwork(object):
             loss = tf.nn.softmax_cross_entropy_with_logits(
                 labels=self.batch_out[:, time_step:time_step + 1, :],
                 logits=prediction,
-                name='loss'
-            )
+                name='loss')
             scalar_loss = tf.reduce_mean(loss, name='loss_mean')
         return scalar_loss, prediction
 
@@ -335,8 +354,6 @@ class MultiHMLSTMNetwork(object):
         return train, loss, indicators, predictions
 
     def train(self, batches_in, batches_out, fresh_start=True, epochs=10):
-        writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
-        summary_ops = tf.summary.merge_all()
         saver = tf.train.Saver()
 
         with tf.Session() as sess:
@@ -344,32 +361,19 @@ class MultiHMLSTMNetwork(object):
             if fresh_start:
                 init = tf.global_variables_initializer()
                 sess.run(init)
-            else:
+            elif not fresh_start:
                 print('loading variables...')
                 saver.restore(sess, self._save_path)
 
-            # Debugging
-            # wrapped_sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-
-            # def input_filter(debug_info, values):
-            #     return 'input_to_cell' in debug_info.node_name
-
-            # def split_filter(debug_info, values):
-            #     return 'split_input' in debug_info.node_name
-
-            # wrapped_sess.add_tensor_filter('input_filter', input_filter)
-            # wrapped_sess.add_tensor_filter('split_input', split_filter)
-
             for epoch in range(epochs):
-                print('new epoch')
+                print('Epoch %d' % epoch)
                 for batch_in, batch_out in zip(batches_in, batches_out):
-                    _, _loss = sess.run(
-                        [self.optim, self.loss], {
-                         self.batch_in: batch_in,
-                         self.batch_out: batch_out,
-                    })
-
-                    # writer.add_summary(_results[0])
+                    ops = [self.optim, self.loss]
+                    feed_dict = {
+                        self.batch_in: batch_in,
+                        self.batch_out: batch_out,
+                    }
+                    _, _loss = sess.run(ops, feed_dict)
                     print('loss:', _loss)
 
             print('saving variables...')
@@ -380,15 +384,17 @@ class MultiHMLSTMNetwork(object):
         with tf.Session() as sess:
             print('loading variables...')
             saver.restore(sess, self._save_path)
+
             return sess.run(self.predictions, {
-                         self.batch_in: batch_in,
-                    })
+                self.batch_in: batch_in,
+            })
 
     def predict_boundaries(self, batch_in):
         saver = tf.train.Saver()
         with tf.Session() as sess:
             print('loading variables...')
             saver.restore(sess, self._save_path)
+
             return sess.run(self.indicators, {
                 self.batch_in: batch_in,
             })
@@ -397,6 +403,7 @@ class MultiHMLSTMNetwork(object):
 from string import ascii_lowercase
 import re
 import numpy as np
+
 
 def text():
     signals = load_text()
@@ -461,7 +468,6 @@ def prepare_inputs():
     return (batches_in, batches_out)
 
 
-
 def get_network():
     return MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
 
@@ -469,7 +475,9 @@ def get_network():
 def run_everything():
     inputs = prepare_inputs()
     network = get_network()
-    network.train(*inputs, fresh_start=False)
+    # print(network.predict(inputs[0][0]))
+    # print(network.predict_boundaries(inputs[0][0]))
+    network.train(*inputs)
 
 
 if __name__ == '__main__':

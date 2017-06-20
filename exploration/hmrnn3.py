@@ -2,12 +2,13 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import variable_scope as vs
+from tensorflow.python import debug as tf_debug
 import tensorflow as tf
 import collections
 
-num_batches = 10000
+num_batches = 10
 batch_size = 2
-truncate_len = 5
+truncate_len = 2
 
 
 HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
@@ -39,9 +40,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         """Hierarchical multi-scale long short-term memory cell (HMLSTM)"""
         c, h, z = state
 
-        in_splits = tf.constant(([self._num_units] * 2) + [1])
-        ha, hb, zb = array_ops.split(
-            value=inputs, num_or_size_splits=in_splits, axis=2)
+        in_splits = tf.constant([self._num_units, 1, self._num_units])
+        hb, zb, ha = array_ops.split(
+            value=inputs, num_or_size_splits=in_splits, axis=2, name='split_input')
 
         s_recurrent = h
         expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
@@ -64,9 +65,6 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
         new_state = HMLSTMState(new_c, new_h, new_z)
-
-        # # NOTE: For debugging
-        # new_state = HMLSTMState(ha, hb, zb)
 
         return output, new_state
 
@@ -173,8 +171,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
         # split out the part of the input that stores values of ha
         raw_h_aboves = inputs[:, :, -sum(c._num_units for c in self._cells):]
-        h_aboves = array_ops.split(
-            value=raw_h_aboves, num_or_size_splits=len(self._cells), axis=2)
+        h_aboves = array_ops.split(value=raw_h_aboves,
+                                   num_or_size_splits=len(self._cells), axis=2)
 
         z_below = tf.ones([tf.shape(inputs)[0], 1, 1])
 
@@ -186,7 +184,7 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
                 cur_state = state[i]
 
                 print(i)
-                cur_inp = array_ops.concat([raw_inp, h_aboves[i]], axis=2)
+                cur_inp = array_ops.concat([raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
                 raw_inp, new_state = cell(cur_inp, cur_state)
                 raw_inp = tf.expand_dims(raw_inp, 1)
                 new_states.append(new_state)
@@ -254,12 +252,6 @@ class MultiHMLSTMNetwork(object):
 
             gated_input = tf.concat(gated_list, axis=1)
         return gated_input
-
-    def keras_classifier_modeul(self, gated_input, time_step):
-        in_size = self._num_layers * self._num_units
-        model = tf.contrib.keras.Sequential()
-        model.add(tf.contrib.keras.layers.Embedding(in_size, self.out_hidden_size))
-        pass
 
     def create_output_module(self, gated_input, time_step):
         with vs.variable_scope('output_module', reuse=True):
@@ -333,7 +325,7 @@ class MultiHMLSTMNetwork(object):
             new_loss, new_prediction = output_module(gated, i)
             loss += tf.reduce_mean(new_loss)
 
-            indicators += [h for c, h, z in state]
+            indicators += [z for c, h, z in state]
 
         train = tf.train.AdamOptimizer(1e-3).minimize(loss)
         return train, loss, indicators
@@ -344,6 +336,18 @@ class MultiHMLSTMNetwork(object):
         with tf.Session() as sess:
             init = tf.global_variables_initializer()
             sess.run(init)
+            # Debugging
+            # wrapped_sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+
+            # def input_filter(debug_info, values):
+            #     return 'input_to_cell' in debug_info.node_name
+
+            # def split_filter(debug_info, values):
+            #     return 'split_input' in debug_info.node_name
+
+            # wrapped_sess.add_tensor_filter('input_filter', input_filter)
+            # wrapped_sess.add_tensor_filter('split_input', split_filter)
+
 
             for epoch in range(epochs):
                 print('new epoch')
@@ -419,6 +423,7 @@ def prepare_inputs():
         batches_out.append([o for _, o in y[start:end]])
 
     return (batches_in, batches_out)
+
 
 
 def get_network():

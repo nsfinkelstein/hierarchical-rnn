@@ -1,4 +1,5 @@
 from string import ascii_lowercase
+from .hmlstm_network import HMLSTMNetwork
 import re
 import numpy as np
 
@@ -8,18 +9,19 @@ batch_size = 2
 truncate_len = 10
 
 
-def text():
-    signals = load_text()
+def text(text_path, truncate_len, step_size):
+    signals = load_text(text_path, truncate_len, step_size)
 
     print(signals)
 
     hot = [(one_hot_encode(intext), one_hot_encode(outtext))
            for intext, outtext in signals]
+
     return hot
 
 
-def load_text():
-    with open('text.txt', 'r') as f:
+def load_text(text_path, truncate_len, step_size):
+    with open(text_path, 'r') as f:
         text = f.read()
         text = text.replace('\n', ' ')
         text = re.sub(' +', ' ', text).lower()
@@ -32,7 +34,7 @@ def load_text():
         intext = text[start:start + truncate_len]
         outtext = text[start + 1:start + truncate_len + 1]
         signals.append((intext, outtext))
-        start += truncate_len
+        start += step_size
 
     return signals
 
@@ -57,8 +59,17 @@ def one_hot_encode(text):
     return out
 
 
-def prepare_inputs():
-    y = text()
+def prepare_inputs(text_path='text.txt', batch_size=10, truncate_len=100,
+                   step_size=None, num_batches=None):
+
+    if step_size is None:
+        step_size = truncate_len // 2
+
+    y = text(text_path, truncate_len, step_size)
+
+    if num_batches is None:
+        num_batches = len(y) // batch_size
+
     batches_in = []
     batches_out = []
 
@@ -68,11 +79,11 @@ def prepare_inputs():
         batches_in.append([i for i, _ in y[start:end]])
         batches_out.append([o for _, o in y[start:end]])
 
-    return (batches_in, batches_out)
+    return batches_in, batches_out
 
 
 def get_network():
-    return MultiHMLSTMNetwork(batch_size, 3, truncate_len, 29)
+    return HMLSTMNetwork(batch_size, 3, truncate_len, 29)
 
 
 def run_everything():

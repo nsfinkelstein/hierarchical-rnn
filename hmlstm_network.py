@@ -5,7 +5,7 @@ from tensorflow.python.ops import variable_scope as vs
 import tensorflow as tf
 
 
-class MultiHMLSTMNetwork(object):
+class HMLSTMNetwork(object):
     def __init__(self,
                  batch_size,
                  num_layers,

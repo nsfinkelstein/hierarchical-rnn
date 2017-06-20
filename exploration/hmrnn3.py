@@ -202,17 +202,13 @@ class MultiHMLSTMNetwork(object):
         self._truncate_len = truncate_len
         self._num_units = num_units  # the length of c and h
 
-        batch_shape = (batch_size, truncate_len, num_units)
-        self.batch_in = tf.placeholder(
-            tf.float32, shape=batch_shape, name='batch_in')
-
-        self.batch_out = tf.placeholder(
-            tf.int32, shape=batch_shape, name='batch_out')
+        self.batch_in = tf.placeholder(tf.float32, name='batch_in')
+        self.batch_out = tf.placeholder(tf.int32, name='batch_out')
 
         self._initialize_output_variables()
         self._initialize_gate_variables()
 
-        self.train, self.loss, self.indicators, self.predictions = self.create_network(
+        self.optim, self.loss, self.indicators, self.predictions = self.create_network(
             self.create_output_module)
 
     def _initialize_gate_variables(self):
@@ -359,7 +355,7 @@ class MultiHMLSTMNetwork(object):
                 print('new epoch')
                 for batch_in, batch_out in zip(batches_in, batches_out):
                     _results = sess.run(
-                        [summary_ops, self.train, self.loss] + self.indicators, {
+                        [summary_ops, self.optim, self.loss] + self.indicators, {
                         self.batch_in: batch_in,
                         self.batch_out: batch_out,
                     })
@@ -378,7 +374,9 @@ import numpy as np
 
 def text():
     signals = load_text()
+
     print(signals)
+
     hot = [(one_hot_encode(intext), one_hot_encode(outtext))
            for intext, outtext in signals]
     return hot
@@ -388,7 +386,7 @@ def load_text():
     with open('text.txt', 'r') as f:
         text = f.read()
         text = text.replace('\n', ' ')
-        text = re.sub(' +', ' ', text)
+        text = re.sub(' +', ' ', text).lower()
 
     # text = 'abcdefghijklmnopqrstuvwxyz' * 100000000
 
@@ -445,7 +443,7 @@ def get_network():
 def run_everything():
     inputs = prepare_inputs()
     network = get_network()
-    network.run(*inputs)
+    network.train(*inputs)
 
 
 if __name__ == '__main__':

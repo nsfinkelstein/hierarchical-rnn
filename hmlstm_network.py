@@ -28,9 +28,10 @@ class HMLSTMNetwork(object):
 
         self._initialize_output_variables()
         self._initialize_gate_variables()
+        self._initialize_embedding_variables()
 
         self.optim, self.loss, self.indicators, self.predictions = self.create_network(
-            self.create_output_module)
+            self.classification_output_module)
 
     def _initialize_gate_variables(self):
         with vs.variable_scope('gates'):
@@ -38,6 +39,13 @@ class HMLSTMNetwork(object):
                 vs.get_variable(
                     'gate_%s' % l, [self._num_units * self._num_layers, 1],
                     dtype=tf.float32)
+
+    def _initialize_embedding_variables(self):
+        with vs.variable_scope('embedding'):
+            embed_shape = [
+                self._num_layers * self._num_units, self._embed_size
+            ]
+            vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
     def _initialize_output_variables(self):
         with vs.variable_scope('output_module'):
@@ -53,10 +61,6 @@ class HMLSTMNetwork(object):
             vs.get_variable(
                 'w3', [self._out_hidden_size, self._num_units],
                 dtype=tf.float32)
-            embed_shape = [
-                self._num_layers * self._num_units, self._embed_size
-            ]
-            vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
@@ -79,14 +83,24 @@ class HMLSTMNetwork(object):
             gated_input = tf.concat(gated_list, axis=1)
         return gated_input
 
-    def create_output_module(self, gated_input, time_step):
-        with vs.variable_scope('output_module', reuse=True):
+    def embed_input(self, gated_input):
+        with vs.variable_scope('embedding', reuse=True):
 
             in_size = self._num_layers * self._num_units
             embed_shape = [in_size, self._embed_size]
             embed_weights = vs.get_variable(
                 'embed_weights', embed_shape, dtype=tf.float32)
 
+            prod = tf.matmul(gated_input, embed_weights)
+            embedding = tf.nn.relu(prod)
+
+        return embedding
+
+    def regression_output_module(self, gated_input, time_step):
+        pass
+
+    def classification_output_module(self, embedding, time_step):
+        with vs.variable_scope('output_module', reuse=True):
             b1 = vs.get_variable(
                 'b1', [1, self._out_hidden_size], dtype=tf.float32)
             b2 = vs.get_variable(
@@ -101,10 +115,6 @@ class HMLSTMNetwork(object):
             w3 = vs.get_variable(
                 'w3', [self._out_hidden_size, self._num_units],
                 dtype=tf.float32)
-
-            # embedding
-            prod = tf.matmul(gated_input, embed_weights)
-            embedding = tf.nn.relu(prod)
 
             # feed forward network
             # first layer

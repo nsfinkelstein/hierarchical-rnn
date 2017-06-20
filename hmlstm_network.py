@@ -163,7 +163,8 @@ class HMLSTMNetwork(object):
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
-            new_loss, new_prediction = output_module(gated, i)
+            embeded = self.embed_input(gated)
+            new_loss, new_prediction = output_module(embeded, i)
             loss += tf.reduce_mean(new_loss)
 
             predictions.append(new_prediction)

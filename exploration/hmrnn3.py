@@ -48,9 +48,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         concat = rnn_cell_impl._linear(
             states,
             length,
-            bias=True,
-            bias_initializer=tf.random_normal_initializer,
-            kernel_initializer=tf.random_normal_initializer)
+            bias=True,)
 
         gate_splits = tf.constant(
             ([self._num_units] * 4) + [1], dtype=tf.int32)
@@ -202,7 +200,7 @@ class MultiHMLSTMNetwork(object):
             tf.float32, shape=batch_shape, name='batch_in')
 
         self.batch_out = tf.placeholder(
-            tf.int32, shape=[batch_size, truncate_len], name='batch_out')
+            tf.int32, shape=batch_shape, name='batch_out')
 
         with vs.variable_scope('gates'):
             for l in range(self._num_layers):
@@ -223,7 +221,7 @@ class MultiHMLSTMNetwork(object):
             embed_shape = [num_layers * num_units, self.embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
-        self.train, self.loss = self.create_network(self.create_output_module)
+        self.train, self.loss, self.predictions = self.create_network(self.create_output_module)
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
@@ -245,6 +243,12 @@ class MultiHMLSTMNetwork(object):
 
             gated_input = tf.concat(gated_list, axis=1)
         return gated_input
+
+    def keras_classifier_modeul(self, gated_input, time_step):
+        in_size = self._num_layers * self._num_units
+        model = tf.contrib.keras.Sequential()
+        model.add(tf.contrib.keras.layers.Embedding(in_size, self.out_hidden_size))
+        pass
 
     def create_output_module(self, gated_input, time_step):
         with vs.variable_scope('output_module', reuse=True):
@@ -276,15 +280,18 @@ class MultiHMLSTMNetwork(object):
             l2 = tf.nn.tanh(tf.matmul(l1, w2) + b2)
 
             # the loss function used below
-            # sparse_softmax_cross_entropy_with_logits
+            # softmax_cross_entropy_with_logits
             prediction = tf.matmul(l2, w3) + b3
-            tf.summary.scalar('prediction', tf.reduce_sum(prediction))
+            tf.summary.tensor_summary('prediction', prediction)
 
-            loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=self.batch_out[:, time_step], logits=prediction,
+            loss = tf.nn.softmax_cross_entropy_with_logits(
+                labels=self.batch_out[:, time_step:time_step + 1, :],
+                logits=prediction,
                 name='loss'
             )
-        return tf.reduce_mean(loss, name='loss_mean')
+            scalar_loss = tf.reduce_mean(loss, name='loss_mean')
+            tf.summary.scalar('loss', scalar_loss)
+        return scalar_loss, prediction
 
     def create_network(self, output_module):
         def hmlstm_cell():
@@ -297,7 +304,8 @@ class MultiHMLSTMNetwork(object):
         ha_shape = [self._batch_size, 1, (self._num_layers * self._num_units)]
         h_aboves = tf.zeros(ha_shape)
 
-        losses = []
+        loss = tf.constant(0.0)
+        predictions = []
         for i in range(self._truncate_len):
             inputs = array_ops.concat(
                 (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
@@ -313,14 +321,16 @@ class MultiHMLSTMNetwork(object):
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
-            losses.append(output_module(gated, i))
+            new_loss, new_prediction = output_module(gated, i)
+            loss += tf.reduce_mean(new_loss)
+            predictions.append(h_aboves)
 
-        loss = tf.reduce_mean(tf.stack(losses))
-        train = tf.train.AdagradOptimizer(1e-5).minimize(loss)
-        return train, loss
+        train = tf.train.AdamOptimizer(1e-3).minimize(loss)
+        return train, loss, predictions
 
     def run(self, batches_in, batches_out, epochs=10):
         writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
+        summary_ops = tf.summary.merge_all()
         with tf.Session() as sess:
             init = tf.global_variables_initializer()
             sess.run(init)
@@ -329,36 +339,46 @@ class MultiHMLSTMNetwork(object):
                 print('new epoch')
                 for batch_in, batch_out in zip(batches_in, batches_out):
 
-                    sparse_batch_out = np.zeros((self._batch_size, self._truncate_len))
-                    for b in range(self._batch_size):
-                        for i in range(self._truncate_len):
-                            char = np.where(batch_out[b][i] == 1)[0][0]
-                            sparse_batch_out[b, i] = int(char)
+                    # print(batch_in)
+                    # print(batch_out)
+                    
+                    # i, o = sess.run([self.batch_in, self.batch_out], {
+                    #     self.batch_in: batch_in,
+                    #     self.batch_out: batch_out,
+                    # })
+                    # print(i, o)
+                    # stop
 
-                    summary_ops = tf.summary.merge_all()
+                    # _predictions = sess.run([self.predictions], {
+                    #     self.batch_in: batch_in,
+                    #     self.batch_out: batch_out,
+                    # })
+                    # print(_predictions)
+                    # stop
+
                     _, _loss, _summary = sess.run(
                         [self.train, self.loss, summary_ops], {
                         self.batch_in: batch_in,
-                        self.batch_out: sparse_batch_out,
+                        self.batch_out: batch_out,
                     })
                     writer.add_summary(_summary)
-                    print(_summary)
                     print(_loss)
 
 from string import ascii_lowercase
 import re
 import numpy as np
 
-num_batches = 100
-batch_size = 10
-truncate_len = 100
+num_batches = 2
+batch_size = 2
+truncate_len = 10
 
 
 def text():
     signals = load_text()
-
-    return [(one_hot_encode(intext), one_hot_encode(outtext))
+    print(signals)
+    hot = [(one_hot_encode(intext), one_hot_encode(outtext))
             for intext, outtext in signals]
+    return hot
 
 
 def load_text():
@@ -371,7 +391,7 @@ def load_text():
 
     signals = []
     start = 0
-    for _ in range(num_batches * batch_size):
+    for _ in range(batch_size * truncate_len):
         intext = text[start:start + truncate_len]
         outtext = text[start + 1:start + truncate_len + 1]
         signals.append((intext, outtext))
@@ -407,9 +427,10 @@ def prepare_inputs():
 
     for batch_number in range(num_batches):
         start = batch_number * batch_size
-        end = (1 + batch_number) * batch_size
+        end = start + batch_size
         batches_in.append([i for i, _ in y[start:end]])
         batches_out.append([o for _, o in y[start:end]])
+
     return (batches_in, batches_out)
 
 
@@ -424,5 +445,4 @@ def run_everything():
 
 
 if __name__ == '__main__':
-    # TODO: Check to make sure the batch inputs are correct
     run_everything()

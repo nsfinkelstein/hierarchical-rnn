@@ -8,7 +8,7 @@ import collections
 
 num_batches = 10
 batch_size = 2
-truncate_len = 2
+truncate_len = 10
 
 
 HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
@@ -46,8 +46,8 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         s_recurrent = h
         expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
-        s_above = tf.squeeze(tf.multiply(expanded_z, ha))
-        s_below = tf.squeeze(tf.multiply(zb, hb))
+        s_above = tf.squeeze(tf.multiply(expanded_z, ha), axis=1)
+        s_below = tf.squeeze(tf.multiply(zb, hb), axis=1)
 
         length = 4 * self._num_units + 1
         states = [s_recurrent, s_above, s_below]
@@ -141,7 +141,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
             with graph.gradient_override_map({'Round': 'Identity'}):
                 new_z = tf.round(sigmoided, name=name)
 
-        return tf.squeeze(new_z)
+        return tf.squeeze(new_z, axis=1)
 
 
 class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
@@ -195,8 +195,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
 class MultiHMLSTMNetwork(object):
     def __init__(self, batch_size, num_layers, truncate_len, num_units):
-        self.out_hidden_size = out_hidden_size = 100
-        self.embed_size = embed_size = 100
+        self._out_hidden_size = 100
+        self._embed_size = 100
         self._batch_size = batch_size
         self._num_layers = num_layers
         self._truncate_len = truncate_len
@@ -209,28 +209,32 @@ class MultiHMLSTMNetwork(object):
         self.batch_out = tf.placeholder(
             tf.int32, shape=batch_shape, name='batch_out')
 
+        self._initialize_output_variables()
+        self._initialize_gate_variables()
+
+        self.train, self.loss, self.indicators, self.predictions = self.create_network(
+            self.create_output_module)
+
+    def _initialize_gate_variables(self):
         with vs.variable_scope('gates'):
             for l in range(self._num_layers):
                 vs.get_variable(
                     'gate_%s' % l, [self._num_units * self._num_layers, 1],
                     dtype=tf.float32)
 
+    def _initialize_output_variables(self):
         with vs.variable_scope('output_module'):
-            vs.get_variable('b1', [1, out_hidden_size], dtype=tf.float32)
-            vs.get_variable('b2', [1, out_hidden_size], dtype=tf.float32)
+            vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
+            vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
             vs.get_variable(
-                'w1', [embed_size, out_hidden_size], dtype=tf.float32)
+                'w1', [self._embed_size, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable(
-                'w2', [out_hidden_size, out_hidden_size], dtype=tf.float32)
+                'w2', [self._out_hidden_size, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable(
-                'w3', [out_hidden_size, self._num_units], dtype=tf.float32)
-            embed_shape = [num_layers * num_units, self.embed_size]
+                'w3', [self._out_hidden_size, self._num_units], dtype=tf.float32)
+            embed_shape = [self._num_layers * self._num_units, self._embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
-
-        self.train, self.loss, self.indicators = self.create_network(
-            self.create_output_module
-        )
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
@@ -257,19 +261,19 @@ class MultiHMLSTMNetwork(object):
         with vs.variable_scope('output_module', reuse=True):
 
             in_size = self._num_layers * self._num_units
-            embed_shape = [in_size, self.embed_size]
+            embed_shape = [in_size, self._embed_size]
             embed_weights = vs.get_variable(
                 'embed_weights', embed_shape, dtype=tf.float32)
 
-            b1 = vs.get_variable('b1', [1, self.out_hidden_size], dtype=tf.float32)
-            b2 = vs.get_variable('b2', [1, self.out_hidden_size], dtype=tf.float32)
+            b1 = vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
+            b2 = vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
             b3 = vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
             w1 = vs.get_variable(
-                'w1', [self.embed_size, self.out_hidden_size], dtype=tf.float32)
+                'w1', [self._embed_size, self._out_hidden_size], dtype=tf.float32)
             w2 = vs.get_variable(
-                'w2', [self.out_hidden_size, self.out_hidden_size], dtype=tf.float32)
+                'w2', [self._out_hidden_size, self._out_hidden_size], dtype=tf.float32)
             w3 = vs.get_variable(
-                'w3', [self.out_hidden_size, self._num_units], dtype=tf.float32)
+                'w3', [self._out_hidden_size, self._num_units], dtype=tf.float32)
 
             # embedding
             prod = tf.matmul(gated_input, embed_weights)
@@ -307,6 +311,7 @@ class MultiHMLSTMNetwork(object):
 
         loss = tf.constant(0.0)
         indicators = []
+        predictions = []
         for i in range(self._truncate_len):
             inputs = array_ops.concat(
                 (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
@@ -325,12 +330,13 @@ class MultiHMLSTMNetwork(object):
             new_loss, new_prediction = output_module(gated, i)
             loss += tf.reduce_mean(new_loss)
 
+            predictions.append(new_prediction)
             indicators += [z for c, h, z in state]
 
         train = tf.train.AdamOptimizer(1e-3).minimize(loss)
-        return train, loss, indicators
+        return train, loss, indicators, predictions
 
-    def run(self, batches_in, batches_out, epochs=10):
+    def train(self, batches_in, batches_out, epochs=10):
         writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
         summary_ops = tf.summary.merge_all()
         with tf.Session() as sess:
@@ -360,6 +366,12 @@ class MultiHMLSTMNetwork(object):
                     writer.add_summary(_results[0])
                     print(_results)
 
+    def predict(self):
+        pass
+
+    def predict_boundaries(self):
+        pass
+
 from string import ascii_lowercase
 import re
 import numpy as np
@@ -373,12 +385,12 @@ def text():
 
 
 def load_text():
-    # with open('text.txt', 'r') as f:
-    #     text = f.read()
-    #     text = text.replace('\n', ' ')
-    #     text = re.sub(' +', ' ', text)
+    with open('text.txt', 'r') as f:
+        text = f.read()
+        text = text.replace('\n', ' ')
+        text = re.sub(' +', ' ', text)
 
-    text = 'abcdefghijklmnopqrstuvwxyz' * 100000000
+    # text = 'abcdefghijklmnopqrstuvwxyz' * 100000000
 
     signals = []
     start = 0

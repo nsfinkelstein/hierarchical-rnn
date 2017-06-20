@@ -1,16 +1,10 @@
-from string import ascii_lowercase
-from .hmlstm_network import HMLSTMNetwork
 import re
 import numpy as np
+from string import ascii_lowercase
 
 
-num_batches = 10
-batch_size = 2
-truncate_len = 10
-
-
-def text(text_path, truncate_len, step_size):
-    signals = load_text(text_path, truncate_len, step_size)
+def text(text_path, truncate_len, step_size, batch_size):
+    signals = load_text(text_path, truncate_len, step_size, batch_size)
 
     print(signals)
 
@@ -20,7 +14,7 @@ def text(text_path, truncate_len, step_size):
     return hot
 
 
-def load_text(text_path, truncate_len, step_size):
+def load_text(text_path, truncate_len, step_size, batch_size):
     with open(text_path, 'r') as f:
         text = f.read()
         text = text.replace('\n', ' ')
@@ -30,7 +24,7 @@ def load_text(text_path, truncate_len, step_size):
 
     signals = []
     start = 0
-    for _ in range(batch_size * num_batches):
+    while start + truncate_len < len(text):
         intext = text[start:start + truncate_len]
         outtext = text[start + 1:start + truncate_len + 1]
         signals.append((intext, outtext))
@@ -59,13 +53,16 @@ def one_hot_encode(text):
     return out
 
 
-def prepare_inputs(text_path='text.txt', batch_size=10, truncate_len=100,
-                   step_size=None, num_batches=None):
+def prepare_inputs(batch_size=10,
+                   truncate_len=100,
+                   text_path='text.txt',
+                   step_size=None,
+                   num_batches=None):
 
     if step_size is None:
         step_size = truncate_len // 2
 
-    y = text(text_path, truncate_len, step_size)
+    y = text(text_path, truncate_len, step_size, batch_size)
 
     if num_batches is None:
         num_batches = len(y) // batch_size
@@ -80,19 +77,3 @@ def prepare_inputs(text_path='text.txt', batch_size=10, truncate_len=100,
         batches_out.append([o for _, o in y[start:end]])
 
     return batches_in, batches_out
-
-
-def get_network():
-    return HMLSTMNetwork(batch_size, 3, truncate_len, 29)
-
-
-def run_everything():
-    inputs = prepare_inputs()
-    network = get_network()
-    # print(network.predict(inputs[0][0]))
-    # print(network.predict_boundaries(inputs[0][0]))
-    network.train(*inputs)
-
-
-if __name__ == '__main__':
-    run_everything()

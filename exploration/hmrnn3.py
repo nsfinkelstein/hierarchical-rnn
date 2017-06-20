@@ -194,16 +194,18 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
 
 class MultiHMLSTMNetwork(object):
-    def __init__(self, batch_size, num_layers, truncate_len, num_units):
+    def __init__(self, batch_size, num_layers, truncate_len, num_units, save_path='./hmlstm.ckpt'):
         self._out_hidden_size = 100
         self._embed_size = 100
         self._batch_size = batch_size
         self._num_layers = num_layers
         self._truncate_len = truncate_len
         self._num_units = num_units  # the length of c and h
+        self._save_path = save_path
 
-        self.batch_in = tf.placeholder(tf.float32, name='batch_in')
-        self.batch_out = tf.placeholder(tf.int32, name='batch_out')
+        batch_shape = (batch_size, truncate_len, num_units)
+        self.batch_in = tf.placeholder(tf.float32, shape=batch_shape, name='batch_in')
+        self.batch_out = tf.placeholder(tf.int32, shape=batch_shape, name='batch_out')
 
         self._initialize_output_variables()
         self._initialize_gate_variables()
@@ -332,12 +334,20 @@ class MultiHMLSTMNetwork(object):
         train = tf.train.AdamOptimizer(1e-3).minimize(loss)
         return train, loss, indicators, predictions
 
-    def train(self, batches_in, batches_out, epochs=10):
+    def train(self, batches_in, batches_out, fresh_start=True, epochs=10):
         writer = tf.summary.FileWriter('./log/', tf.get_default_graph())
         summary_ops = tf.summary.merge_all()
+        saver = tf.train.Saver()
+
         with tf.Session() as sess:
-            init = tf.global_variables_initializer()
-            sess.run(init)
+
+            if fresh_start:
+                init = tf.global_variables_initializer()
+                sess.run(init)
+            else:
+                print('loading variables...')
+                saver.restore(sess, self._save_path)
+
             # Debugging
             # wrapped_sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 
@@ -350,23 +360,39 @@ class MultiHMLSTMNetwork(object):
             # wrapped_sess.add_tensor_filter('input_filter', input_filter)
             # wrapped_sess.add_tensor_filter('split_input', split_filter)
 
-
             for epoch in range(epochs):
                 print('new epoch')
                 for batch_in, batch_out in zip(batches_in, batches_out):
-                    _results = sess.run(
-                        [summary_ops, self.optim, self.loss] + self.indicators, {
-                        self.batch_in: batch_in,
-                        self.batch_out: batch_out,
+                    _, _loss = sess.run(
+                        [self.optim, self.loss], {
+                         self.batch_in: batch_in,
+                         self.batch_out: batch_out,
                     })
-                    writer.add_summary(_results[0])
-                    print(_results)
 
-    def predict(self):
-        pass
+                    # writer.add_summary(_results[0])
+                    print('loss:', _loss)
 
-    def predict_boundaries(self):
-        pass
+            print('saving variables...')
+            saver.save(sess, self._save_path)
+
+    def predict(self, batch_in):
+        saver = tf.train.Saver()
+        with tf.Session() as sess:
+            print('loading variables...')
+            saver.restore(sess, self._save_path)
+            return sess.run(self.predictions, {
+                         self.batch_in: batch_in,
+                    })
+
+    def predict_boundaries(self, batch_in):
+        saver = tf.train.Saver()
+        with tf.Session() as sess:
+            print('loading variables...')
+            saver.restore(sess, self._save_path)
+            return sess.run(self.indicators, {
+                self.batch_in: batch_in,
+            })
+
 
 from string import ascii_lowercase
 import re
@@ -443,7 +469,7 @@ def get_network():
 def run_everything():
     inputs = prepare_inputs()
     network = get_network()
-    network.train(*inputs)
+    network.train(*inputs, fresh_start=False)
 
 
 if __name__ == '__main__':

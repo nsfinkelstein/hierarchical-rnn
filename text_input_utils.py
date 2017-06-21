@@ -14,7 +14,7 @@ def text(text_path, truncate_len, step_size, batch_size):
 
 def load_text(text_path, truncate_len, step_size, batch_size):
     with open(text_path, 'r') as f:
-        text = f.read()[:400]
+        text = f.read()
         text = text.replace('\n', ' ')
         text = re.sub(' +', ' ', text).lower()
 

@@ -3,6 +3,7 @@ from multi_hmlstm_cell import MultiHMLSTMCell
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variable_scope as vs
 import tensorflow as tf
+import numpy as np
 
 
 class HMLSTMNetwork(object):
@@ -11,10 +12,13 @@ class HMLSTMNetwork(object):
                  output_size=1,
                  num_layers=3,
                  hidden_state_sizes=50,
+                 out_hidden_size=100,
+                 embed_size=100,
                  task='classification',
                  save_path='./hmlstm.ckpt'):
-        self._out_hidden_size = 100
-        self._embed_size = 100
+
+        self._out_hidden_size = out_hidden_size
+        self._embed_size = embed_size
         self._num_layers = num_layers
         self._save_path = save_path
         self._input_size = input_size
@@ -182,7 +186,7 @@ class HMLSTMNetwork(object):
         return train, loss, indicators, predictions
 
     def train(self, batches_in, batches_out, reuse=None,
-              load_existing_vars=False, epochs=10):
+              load_existing_vars=False, epochs=3):
         batch_size = len(batches_in[0])
         truncate_len = len(batches_in[0][0])
         optim, loss, _, _ = self.create_network(self.output_module, batch_size,
@@ -223,9 +227,11 @@ class HMLSTMNetwork(object):
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
-            return sess.run(predictions, {
+            _predictions = sess.run(predictions, {
                 self.batch_in: batch_in,
             })
+
+        return np.array(_predictions).reshape(self._num_layers, -1)
 
     def predict_boundaries(self, batch_in, reuse=None):
         batch_size = len(batch_in)
@@ -238,6 +244,8 @@ class HMLSTMNetwork(object):
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
-            return sess.run(indicators, {
+            _indicators = sess.run(indicators, {
                 self.batch_in: batch_in,
             })
+
+        return np.array(_indicators).reshape(self._num_layers, -1)

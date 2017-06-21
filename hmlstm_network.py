@@ -22,6 +22,8 @@ class HMLSTMNetwork(object):
         self._num_layers = num_layers
         self._save_path = save_path
         self._input_size = input_size
+        self._training_graph = None
+        self._prediction_graph = None
 
         if type(hidden_state_sizes) == int:
             self._hidden_state_sizes = [hidden_state_sizes] * self._num_layers
@@ -31,9 +33,11 @@ class HMLSTMNetwork(object):
         if task == 'classification':
             self._loss_function = tf.nn.softmax_cross_entropy_with_logits
             self._output_size = output_size
+            self._prediction_arg = 'logits'
         elif task == 'regression':
-            self._loss_function = tf.losses.mean_pairwise_squared_error
+            self._loss_function = tf.losses.mean_squared_error
             self._output_size = 1
+            self._prediction_arg = 'predictions'
         else:
             raise ValueError('Not a valid task')
 
@@ -129,10 +133,12 @@ class HMLSTMNetwork(object):
             # softmax_cross_entropy_with_logits
             prediction = tf.matmul(l2, w3) + b3
 
-            loss = self._loss_function(
-                labels=self.batch_out[:, time_step:time_step + 1, :],
-                logits=prediction,
-                name='loss')
+            loss_args = {
+                self._prediction_arg: tf.squeeze(prediction),
+                'labels': tf.squeeze(self.batch_out[:, time_step:time_step + 1, :]),
+            }
+
+            loss = self._loss_function(**loss_args)
             scalar_loss = tf.reduce_mean(loss, name='loss_mean')
         return scalar_loss, prediction
 
@@ -150,8 +156,8 @@ class HMLSTMNetwork(object):
             else:
                 h_above_size = self._hidden_state_sizes[layer + 1]
 
-            return HMLSTMCell(self._hidden_state_sizes[layer],
-                              batch_size, h_below_size, h_above_size, reuse)
+            return HMLSTMCell(self._hidden_state_sizes[layer], batch_size,
+                              h_below_size, h_above_size, reuse)
 
         hmlstm = MultiHMLSTMCell(
             [hmlstm_cell(l) for l in range(self._num_layers)], reuse=reuse)
@@ -169,9 +175,10 @@ class HMLSTMNetwork(object):
 
             hidden_states, state = hmlstm(inputs, state)
             concated_hs = array_ops.concat(hidden_states[1:], axis=1)
-            h_above_for_last_layer = tf.zeros([batch_size, self._hidden_state_sizes[0]], dtype=tf.float32)
-            h_aboves = array_ops.concat([concated_hs, h_above_for_last_layer],
-                                         axis=1)
+            h_above_for_last_layer = tf.zeros(
+                [batch_size, self._hidden_state_sizes[0]], dtype=tf.float32)
+            h_aboves = array_ops.concat(
+                [concated_hs, h_above_for_last_layer], axis=1)
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
@@ -180,17 +187,26 @@ class HMLSTMNetwork(object):
             loss += tf.reduce_mean(new_loss)
 
             predictions.append(new_prediction)
-            indicators += [z for c, h, z in state]
+            indicators.append([z for c, h, z in state])
 
         train = self._optimizer.minimize(loss)
         return train, loss, indicators, predictions
 
-    def train(self, batches_in, batches_out, reuse=None,
-              load_existing_vars=False, epochs=3):
-        batch_size = len(batches_in[0])
-        truncate_len = len(batches_in[0][0])
-        optim, loss, _, _ = self.create_network(self.output_module, batch_size,
-                                                truncate_len, reuse)
+    def train(self,
+              batches_in,
+              batches_out,
+              reuse=None,
+              load_existing_vars=False,
+              epochs=3):
+
+        if self._training_graph is None:
+            batch_size = len(batches_in[0])
+            truncate_len = len(batches_in[0][0])
+            self._training_graph = self.create_network(self.output_module,
+                                                       batch_size,
+                                                       truncate_len, reuse)
+
+        optim, loss, _, _ = self._training_graph
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
@@ -216,11 +232,13 @@ class HMLSTMNetwork(object):
             print('saving variables...')
             saver.save(sess, self._save_path)
 
-    def predict(self, batch_in, reuse=None):
-        batch_size = len(batch_in)
-        truncate_len = len(batch_in[0])
-        _, _, _, predictions = self.create_network(self.output_module,
-                                                   batch_size, truncate_len, reuse)
+    def predict(self, signal, reuse=True):
+        if self._prediction_graph is None:
+            truncate_len = len(signal)
+            self._prediction_graph = self.create_network(self.output_module, 1,
+                                                   truncate_len, reuse)
+
+        _, _, _, predictions = self._prediction_graph
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
@@ -228,16 +246,18 @@ class HMLSTMNetwork(object):
             saver.restore(sess, self._save_path)
 
             _predictions = sess.run(predictions, {
-                self.batch_in: batch_in,
+                self.batch_in: [signal],
             })
 
-        return np.array(_predictions).reshape(self._num_layers, -1)
+        return np.array(_predictions)
 
-    def predict_boundaries(self, batch_in, reuse=None):
-        batch_size = len(batch_in)
-        truncate_len = len(batch_in[0])
-        _, _, indicators, _ = self.create_network(self.output_module,
-                                                  batch_size, truncate_len, reuse)
+    def predict_boundaries(self, signal, reuse=True):
+        if self._prediction_graph is None:
+            truncate_len = len(signal)
+            self._prediction_graph = self.create_network(self.output_module, 1,
+                                                   truncate_len, reuse)
+
+        _, _, indicators, _ = self._prediction_graph
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
@@ -245,7 +265,7 @@ class HMLSTMNetwork(object):
             saver.restore(sess, self._save_path)
 
             _indicators = sess.run(indicators, {
-                self.batch_in: batch_in,
+                self.batch_in: [signal],
             })
 
-        return np.array(_indicators).reshape(self._num_layers, -1)
+        return np.array(_indicators).T

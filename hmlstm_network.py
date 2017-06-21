@@ -200,8 +200,9 @@ class HMLSTMNetwork(object):
               epochs=3):
 
         if self._training_graph is None:
-            batch_size = len(batches_in[0][0])
-            truncate_len = len(batches_in[0][0][0])
+            batch_size = len(batches_in[0])
+            truncate_len = len(batches_in[0][0])
+            print('truncate_len', truncate_len)
             self._training_graph = self.create_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)

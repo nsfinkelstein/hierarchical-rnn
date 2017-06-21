@@ -14,7 +14,7 @@ def train_network(batch_size, truncate_len):
 
 if __name__ == '__main__':
     batch_size = 2
-    truncate_len = 30
+    truncate_len = 100
 
     inputs = prepare_inputs(batch_size=batch_size, truncate_len=truncate_len)
     network = get_network(batch_size, truncate_len)

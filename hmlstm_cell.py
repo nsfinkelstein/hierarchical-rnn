@@ -9,9 +9,12 @@ HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
 
 
 class HMLSTMCell(rnn_cell_impl.RNNCell):
-    def __init__(self, num_units, batch_size, reuse=None):
+    def __init__(self, num_units, batch_size, h_below_size, h_above_size,
+                 reuse=None):
         super(HMLSTMCell, self).__init__(_reuse=reuse)
         self._num_units = num_units
+        self._h_below_size = h_below_size
+        self._h_above_size = h_above_size
         self._batch_size = batch_size
 
     @property
@@ -34,7 +37,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         """Hierarchical multi-scale long short-term memory cell (HMLSTM)"""
         c, h, z = state
 
-        in_splits = tf.constant([self._num_units, 1, self._num_units])
+        in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
         hb, zb, ha = array_ops.split(
             value=inputs,
             num_or_size_splits=in_splits,

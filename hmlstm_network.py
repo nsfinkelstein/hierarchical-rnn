@@ -7,17 +7,22 @@ import tensorflow as tf
 
 class HMLSTMNetwork(object):
     def __init__(self,
-                 hidden_state_size=29,
+                 input_size=29,
                  output_size=1,
                  num_layers=3,
+                 hidden_state_sizes=50,
                  task='classification',
                  save_path='./hmlstm.ckpt'):
-        # TODO: deal with output size - can be different from hidden units
         self._out_hidden_size = 100
         self._embed_size = 100
         self._num_layers = num_layers
-        self._num_units = hidden_state_size
         self._save_path = save_path
+        self._input_size = input_size
+
+        if type(hidden_state_sizes) == int:
+            self._hidden_state_sizes = [hidden_state_sizes] * self._num_layers
+        else:
+            self._hidden_state_sizes = hidden_state_sizes
 
         if task == 'classification':
             self._loss_function = tf.nn.softmax_cross_entropy_with_logits
@@ -43,14 +48,12 @@ class HMLSTMNetwork(object):
         with vs.variable_scope('gates'):
             for l in range(self._num_layers):
                 vs.get_variable(
-                    'gate_%s' % l, [self._num_units * self._num_layers, 1],
+                    'gate_%s' % l, [sum(self._hidden_state_sizes), 1],
                     dtype=tf.float32)
 
     def _initialize_embedding_variables(self):
         with vs.variable_scope('embedding'):
-            embed_shape = [
-                self._num_layers * self._num_units, self._embed_size
-            ]
+            embed_shape = [sum(self._hidden_state_sizes), self._embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
     def _initialize_output_variables(self):
@@ -74,7 +77,7 @@ class HMLSTMNetwork(object):
             gates = []
             for l in range(self._num_layers):
                 weights = vs.get_variable(
-                    'gate_%s' % l, [self._num_units * self._num_layers, 1],
+                    'gate_%s' % l, [sum(self._hidden_state_sizes), 1],
                     dtype=tf.float32)
                 gates.append(tf.sigmoid(tf.matmul(hidden_states, weights)))
 
@@ -92,7 +95,7 @@ class HMLSTMNetwork(object):
     def embed_input(self, gated_input):
         with vs.variable_scope('embedding', reuse=True):
 
-            in_size = self._num_layers * self._num_units
+            in_size = sum(self._hidden_state_sizes)
             embed_shape = [in_size, self._embed_size]
             embed_weights = vs.get_variable(
                 'embed_weights', embed_shape, dtype=tf.float32)
@@ -130,14 +133,27 @@ class HMLSTMNetwork(object):
         return scalar_loss, prediction
 
     def create_network(self, output_module, batch_size, truncate_len, reuse):
-        def hmlstm_cell():
-            return HMLSTMCell(self._num_units, batch_size, reuse)
+        def hmlstm_cell(layer):
+            if layer == 0:
+                h_below_size = self._input_size
+            else:
+                h_below_size = self._hidden_state_sizes[layer - 1]
+
+            if layer == self._num_layers - 1:
+                # doesn't matter, all zeros, but for convenience with summing
+                # so the sum of ha sizes is just sum of hidden states
+                h_above_size = self._hidden_state_sizes[0]
+            else:
+                h_above_size = self._hidden_state_sizes[layer + 1]
+
+            return HMLSTMCell(self._hidden_state_sizes[layer],
+                              batch_size, h_below_size, h_above_size, reuse)
 
         hmlstm = MultiHMLSTMCell(
-            [hmlstm_cell() for _ in range(self._num_layers)], reuse=reuse)
+            [hmlstm_cell(l) for l in range(self._num_layers)], reuse=reuse)
 
         state = hmlstm.zero_state(batch_size, tf.float32)
-        ha_shape = [batch_size, 1, (self._num_layers * self._num_units)]
+        ha_shape = [batch_size, 1, sum(self._hidden_state_sizes)]
         h_aboves = tf.zeros(ha_shape)
 
         loss = tf.constant(0.0)
@@ -149,12 +165,9 @@ class HMLSTMNetwork(object):
 
             hidden_states, state = hmlstm(inputs, state)
             concated_hs = array_ops.concat(hidden_states[1:], axis=1)
-            h_aboves = array_ops.concat(
-                [
-                    concated_hs, tf.zeros(
-                        [batch_size, self._num_units], dtype=tf.float32)
-                ],
-                axis=1)
+            h_above_for_last_layer = tf.zeros([batch_size, self._hidden_state_sizes[0]], dtype=tf.float32)
+            h_aboves = array_ops.concat([concated_hs, h_above_for_last_layer],
+                                         axis=1)
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
@@ -178,10 +191,10 @@ class HMLSTMNetwork(object):
         saver = tf.train.Saver()
         with tf.Session() as sess:
 
-            if load_existing_vars:
+            if not load_existing_vars:
                 init = tf.global_variables_initializer()
                 sess.run(init)
-            elif not load_existing_vars:
+            elif load_existing_vars:
                 print('loading variables...')
                 saver.restore(sess, self._save_path)
 

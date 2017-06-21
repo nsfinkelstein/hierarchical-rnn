@@ -7,41 +7,37 @@ import tensorflow as tf
 
 class HMLSTMNetwork(object):
     def __init__(self,
-                 batch_size,
-                 num_layers,
-                 truncate_len,
-                 num_units,
+                 hidden_state_size=29,
+                 output_size=1,
+                 num_layers=3,
                  task='classification',
                  save_path='./hmlstm.ckpt'):
+        # TODO: deal with output size - can be different from hidden units
         self._out_hidden_size = 100
         self._embed_size = 100
-        self._batch_size = batch_size
         self._num_layers = num_layers
-        self._truncate_len = truncate_len
-        self._num_units = num_units  # the length of c and h
+        self._num_units = hidden_state_size
         self._save_path = save_path
 
         if task == 'classification':
             self._loss_function = tf.nn.softmax_cross_entropy_with_logits
-            self._output_size = self._num_units
+            self._output_size = output_size
         elif task == 'regression':
             self._loss_function = tf.losses.mean_pairwise_squared_error
-            self._out = 1
+            self._output_size = 1
         else:
             raise ValueError('Not a valid task')
 
-        batch_shape = (batch_size, truncate_len, num_units)
+        batch_shape = (None, None, self._output_size)
         self.batch_in = tf.placeholder(
             tf.float32, shape=batch_shape, name='batch_in')
         self.batch_out = tf.placeholder(
             tf.int32, shape=batch_shape, name='batch_out')
 
+        self._optimizer = tf.train.AdamOptimizer(1e-3)
         self._initialize_output_variables()
         self._initialize_gate_variables()
         self._initialize_embedding_variables()
-
-        self.optim, self.loss, self.indicators, self.predictions = self.create_network(
-            self.output_module)
 
     def _initialize_gate_variables(self):
         with vs.variable_scope('gates'):
@@ -61,7 +57,7 @@ class HMLSTMNetwork(object):
         with vs.variable_scope('output_module'):
             vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
-            vs.get_variable('b3', [1, self._num_units], dtype=tf.float32)
+            vs.get_variable('b3', [1, self._output_size], dtype=tf.float32)
             vs.get_variable(
                 'w1', [self._embed_size, self._out_hidden_size],
                 dtype=tf.float32)
@@ -133,21 +129,21 @@ class HMLSTMNetwork(object):
             scalar_loss = tf.reduce_mean(loss, name='loss_mean')
         return scalar_loss, prediction
 
-    def create_network(self, output_module):
+    def create_network(self, output_module, batch_size, truncate_len, reuse):
         def hmlstm_cell():
-            return HMLSTMCell(self._num_units, self._batch_size)
+            return HMLSTMCell(self._num_units, batch_size, reuse)
 
         hmlstm = MultiHMLSTMCell(
-            [hmlstm_cell() for _ in range(self._num_layers)])
+            [hmlstm_cell() for _ in range(self._num_layers)], reuse=reuse)
 
-        state = hmlstm.zero_state(self._batch_size, tf.float32)
-        ha_shape = [self._batch_size, 1, (self._num_layers * self._num_units)]
+        state = hmlstm.zero_state(batch_size, tf.float32)
+        ha_shape = [batch_size, 1, (self._num_layers * self._num_units)]
         h_aboves = tf.zeros(ha_shape)
 
         loss = tf.constant(0.0)
         indicators = []
         predictions = []
-        for i in range(self._truncate_len):
+        for i in range(truncate_len):
             inputs = array_ops.concat(
                 (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
 
@@ -156,7 +152,7 @@ class HMLSTMNetwork(object):
             h_aboves = array_ops.concat(
                 [
                     concated_hs, tf.zeros(
-                        [self._batch_size, self._num_units], dtype=tf.float32)
+                        [batch_size, self._num_units], dtype=tf.float32)
                 ],
                 axis=1)
             h_aboves = tf.expand_dims(h_aboves, 1)
@@ -169,25 +165,30 @@ class HMLSTMNetwork(object):
             predictions.append(new_prediction)
             indicators += [z for c, h, z in state]
 
-        train = tf.train.AdamOptimizer(1e-3).minimize(loss)
+        train = self._optimizer.minimize(loss)
         return train, loss, indicators, predictions
 
-    def train(self, batches_in, batches_out, fresh_start=True, epochs=10):
-        saver = tf.train.Saver()
+    def train(self, batches_in, batches_out, reuse=None,
+              load_existing_vars=False, epochs=10):
+        batch_size = len(batches_in[0])
+        truncate_len = len(batches_in[0][0])
+        optim, loss, _, _ = self.create_network(self.output_module, batch_size,
+                                                truncate_len, reuse)
 
+        saver = tf.train.Saver()
         with tf.Session() as sess:
 
-            if fresh_start:
+            if load_existing_vars:
                 init = tf.global_variables_initializer()
                 sess.run(init)
-            elif not fresh_start:
+            elif not load_existing_vars:
                 print('loading variables...')
                 saver.restore(sess, self._save_path)
 
             for epoch in range(epochs):
                 print('Epoch %d' % epoch)
                 for batch_in, batch_out in zip(batches_in, batches_out):
-                    ops = [self.optim, self.loss]
+                    ops = [optim, loss]
                     feed_dict = {
                         self.batch_in: batch_in,
                         self.batch_out: batch_out,
@@ -198,22 +199,32 @@ class HMLSTMNetwork(object):
             print('saving variables...')
             saver.save(sess, self._save_path)
 
-    def predict(self, batch_in):
+    def predict(self, batch_in, reuse=None):
+        batch_size = len(batch_in)
+        truncate_len = len(batch_in[0])
+        _, _, _, predictions = self.create_network(self.output_module,
+                                                   batch_size, truncate_len, reuse)
+
         saver = tf.train.Saver()
         with tf.Session() as sess:
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
-            return sess.run(self.predictions, {
+            return sess.run(predictions, {
                 self.batch_in: batch_in,
             })
 
-    def predict_boundaries(self, batch_in):
+    def predict_boundaries(self, batch_in, reuse=None):
+        batch_size = len(batch_in)
+        truncate_len = len(batch_in[0])
+        _, _, indicators, _ = self.create_network(self.output_module,
+                                                  batch_size, truncate_len, reuse)
+
         saver = tf.train.Saver()
         with tf.Session() as sess:
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
-            return sess.run(self.indicators, {
+            return sess.run(indicators, {
                 self.batch_in: batch_in,
             })

@@ -8,8 +8,8 @@ import tensorflow as tf
 class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
     """HMLSTM cell composed squentially of individual HMLSTM cells."""
 
-    def __init__(self, cells):
-        super(MultiHMLSTMCell, self).__init__(_reuse=None)
+    def __init__(self, cells, reuse=None):
+        super(MultiHMLSTMCell, self).__init__(_reuse=reuse)
         self._cells = cells
 
     def zero_state(self, batch_size, dtype):

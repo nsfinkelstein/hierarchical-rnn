@@ -9,8 +9,8 @@ HMLSTMState = collections.namedtuple('HMLSTMCellState', ('c', 'h', 'z'))
 
 
 class HMLSTMCell(rnn_cell_impl.RNNCell):
-    def __init__(self, num_units, batch_size):
-        super(HMLSTMCell, self).__init__(_reuse=None)
+    def __init__(self, num_units, batch_size, reuse=None):
+        super(HMLSTMCell, self).__init__(_reuse=reuse)
         self._num_units = num_units
         self._batch_size = batch_size
 

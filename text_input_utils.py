@@ -6,8 +6,6 @@ from string import ascii_lowercase
 def text(text_path, truncate_len, step_size, batch_size):
     signals = load_text(text_path, truncate_len, step_size, batch_size)
 
-    print(signals)
-
     hot = [(one_hot_encode(intext), one_hot_encode(outtext))
            for intext, outtext in signals]
 
@@ -16,7 +14,7 @@ def text(text_path, truncate_len, step_size, batch_size):
 
 def load_text(text_path, truncate_len, step_size, batch_size):
     with open(text_path, 'r') as f:
-        text = f.read()
+        text = f.read()[:400]
         text = text.replace('\n', ' ')
         text = re.sub(' +', ' ', text).lower()
 

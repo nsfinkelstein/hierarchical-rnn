@@ -1,25 +1,17 @@
 from hmlstm_network import HMLSTMNetwork
 from text_input_utils import prepare_inputs
 
+batch_size = 2
+truncate_len = 3
+num_batches = 3
 
-def get_network(batch_size, truncate_len):
-    return HMLSTMNetwork(batch_size, 3, truncate_len, 29)
+network = HMLSTMNetwork(num_layers=3, output_size=29)
 
+inputs = prepare_inputs(
+    batch_size=batch_size, truncate_len=truncate_len, num_batches=3)
 
-def train_network(batch_size, truncate_len):
-    inputs = prepare_inputs(batch_size=batch_size, truncate_len=truncate_len)
-    network = get_network(batch_size, truncate_len)
-    network.train(*inputs)
+print(len(inputs))
+network.train(*inputs)
 
-
-if __name__ == '__main__':
-    batch_size = 2
-    truncate_len = 100
-
-    inputs = prepare_inputs(batch_size=batch_size, truncate_len=truncate_len)
-    network = get_network(batch_size, truncate_len)
-    network.train(*inputs)
-
-    prediction_network = get_network(batch_size=1, truncate_len=100000)
-    inputs = prepare_inputs(batch_size=1, truncate_len=100000)
-    prediction_network.predict_boundaries(inputs[0][0])
+inputs = prepare_inputs(batch_size=1, truncate_len=100)
+print(network.predict_boundaries(inputs[0][2], reuse=True))

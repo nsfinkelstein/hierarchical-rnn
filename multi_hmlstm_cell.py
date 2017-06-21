@@ -31,9 +31,9 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         raw_inp = inputs[:, :, :-sum(c._num_units for c in self._cells)]
 
         # split out the part of the input that stores values of ha
-        raw_h_aboves = inputs[:, :, -sum(c._num_units for c in self._cells):]
-        h_aboves = array_ops.split(
-            value=raw_h_aboves, num_or_size_splits=len(self._cells), axis=2)
+        raw_h_aboves = inputs[:, :, -sum(c._h_above_size for c in self._cells):]
+        h_aboves = array_ops.split(value=raw_h_aboves,
+                                   num_or_size_splits=[c._h_above_size for c in self._cells], axis=2)
 
         z_below = tf.ones([tf.shape(inputs)[0], 1, 1])
 

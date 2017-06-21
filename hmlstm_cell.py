@@ -56,6 +56,11 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         i, g, f, o, z_tilde = array_ops.split(
             value=concat, num_or_size_splits=gate_splits, axis=1)
 
+        i = tf.sigmoid(i)
+        g = tf.tanh(g)
+        f = tf.sigmoid(f)
+        o = tf.sigmoid(o)
+
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = self.calculate_new_indicator(z_tilde)
@@ -127,7 +132,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
     def calculate_new_indicator(self, z_tilde):
         # use slope annealing trick
         slope_multiplier = 1  # tf.maximum(tf.constant(.02) + self.epoch, tf.constant(5.))
-        sigmoided = tf.sigmoid(z_tilde) * slope_multiplier
+        sigmoided = tf.sigmoid(z_tilde * slope_multiplier)
 
         # replace gradient calculation - use straight-through estimator
         # see: https://r2rt.com/binary-stochastic-neurons-in-tensorflow.html

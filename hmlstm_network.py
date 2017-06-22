@@ -2,6 +2,7 @@ from hmlstm_cell import HMLSTMCell
 from multi_hmlstm_cell import MultiHMLSTMCell
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variable_scope as vs
+from tensorflow.python import debug as tf_debug
 import tensorflow as tf
 import numpy as np
 
@@ -202,7 +203,6 @@ class HMLSTMNetwork(object):
         if self._training_graph is None:
             batch_size = len(batches_in[0])
             truncate_len = len(batches_in[0][0])
-            print('truncate_len', truncate_len)
             self._training_graph = self.create_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)
@@ -211,7 +211,6 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
-
             if not load_existing_vars:
                 init = tf.global_variables_initializer()
                 sess.run(init)
@@ -243,6 +242,7 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
@@ -262,6 +262,9 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            # sess.add_tensor_filter('equal', lambda d, t: 'equal' in d.node_name)
+
             print('loading variables...')
             saver.restore(sess, self._save_path)
 

@@ -44,7 +44,6 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
             with vs.variable_scope("cell_%d" % i):
                 cur_state = state[i]
 
-                print(i)
                 cur_inp = array_ops.concat(
                     [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
                 raw_inp, new_state = cell(cur_inp, cur_state)

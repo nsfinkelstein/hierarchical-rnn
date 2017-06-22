@@ -96,17 +96,17 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                     (tf.logical_and(
                         tf.equal(
                             tf.squeeze(z[b]), tf.constant(
-                                0., dtype=tf.float32)),
+                                0., dtype=tf.float32), name='equal'),
                         tf.equal(
                             tf.squeeze(zb[b]),
-                            tf.constant(0., dtype=tf.float32))), copy_c),
+                            tf.constant(0., dtype=tf.float32), name='equal')), copy_c),
                     (tf.logical_and(
                         tf.equal(
                             tf.squeeze(z[b]), tf.constant(
-                                0., dtype=tf.float32)),
+                                0., dtype=tf.float32), name='equal'),
                         tf.equal(
                             tf.squeeze(zb[b]),
-                            tf.constant(1., dtype=tf.float32))), update_c),
+                            tf.constant(1., dtype=tf.float32), name='equal')), update_c),
                 ],
                 default=update_c,
                 exclusive=True)
@@ -126,9 +126,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
             new_h[b] = tf.cond(
                 tf.logical_and(
                     tf.equal(
-                        tf.squeeze(z[b]), tf.constant(0., dtype=tf.float32)),
+                        tf.squeeze(z[b]), tf.constant(0., dtype=tf.float32), name='equal'),
                     tf.equal(
-                        tf.squeeze(zb[b]), tf.constant(0., dtype=tf.float32))),
+                        tf.squeeze(zb[b]), tf.constant(0., dtype=tf.float32), name='equal')),
                 copy_h, update_h)
         return tf.stack(new_h, axis=0)
 

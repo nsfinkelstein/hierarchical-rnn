@@ -75,10 +75,6 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         f = tf.sigmoid(f)
         o = tf.sigmoid(o)
 
-        # new_c = c
-        # new_h = h
-        # new_z = z
-
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = self.calculate_new_indicator(z_tilde)
@@ -88,7 +84,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         new_z = tf.identity(new_z, name='xxx_new_z')
 
         output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
-        new_state = HMLSTMState(new_c, new_h, new_z)
+        new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
 
         return output, new_state
 
@@ -99,7 +95,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         for b in range(self._batch_size):
 
             def copy_c():
-                return c[b]
+                return tf.identity(c[b])
 
             def update_c():
                 return tf.add(tf.multiply(f[b], c[b]), tf.multiply(i[b], g[b]))
@@ -108,12 +104,13 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                 return tf.multiply(i[b], g[b], name='c')
 
             def default_c():
-                return tf.ones_like(flush_c()) * -11
+                return tf.zeros_like(flush_c())
 
             new_c[b] = tf.case(
                 {
                     tf.equal(
-                        tf.squeeze(z[b]), tf.constant(1., dtype=tf.float32)
+                        tf.squeeze(z[b]), tf.constant(1., dtype=tf.float32),
+                        name='flush_c_xxx'
                     ): flush_c,
                     tf.logical_and(
                         tf.equal(
@@ -121,7 +118,8 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                             tf.constant(0., dtype=tf.float32)),
                         tf.equal(
                             tf.squeeze(zb[b]),
-                            tf.constant(0., dtype=tf.float32))
+                            tf.constant(0., dtype=tf.float32)),
+                        name='copy_c_xxx'
                     ): copy_c,
                     tf.logical_and(
                         tf.equal(
@@ -129,7 +127,8 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                             tf.constant(0., dtype=tf.float32)),
                         tf.equal(
                             tf.squeeze(zb[b]),
-                            tf.constant(1., dtype=tf.float32))
+                            tf.constant(1., dtype=tf.float32)),
+                        name='update_c_xxx'
                     ): update_c,
                 },
                 default=default_c,
@@ -142,7 +141,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         for b in range(self._batch_size):
 
             def copy_h():
-                return h[b]
+                return tf.identity( h[b] )
 
             def update_h():
                 return tf.multiply(o[b], tf.tanh(new_c[b]))

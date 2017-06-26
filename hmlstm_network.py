@@ -23,7 +23,7 @@ class HMLSTMNetwork(object):
         self._num_layers = num_layers
         self._save_path = save_path
         self._input_size = input_size
-        self._training_graph = None
+        self._training_graph = dict()
         self._prediction_graph = None
 
         if type(hidden_state_sizes) == int:
@@ -200,21 +200,22 @@ class HMLSTMNetwork(object):
               load_existing_vars=False,
               epochs=3):
 
-        if self._training_graph is None:
-            batch_size = len(batches_in[0])
-            truncate_len = len(batches_in[0][0])
-            self._training_graph = self.create_network(self.output_module,
+        batch_size = len(batches_in[0])
+        truncate_len = len(batches_in[0][0])
+        key = (batch_size, truncate_len)
+        if self._training_graph.get(key) is None:
+            self._training_graph[key] = self.create_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)
 
-        optim, loss, _, _ = self._training_graph
+        optim, loss, _, _ = self._training_graph[key]
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
-            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            def debug(d, t):
-                return 'xxx' in d.node_name
-            sess.add_tensor_filter('debug', debug)
+            #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            #def debug(d, t):
+            #    return 'xxx' in d.node_name
+            #sess.add_tensor_filter('debug', debug)
 
             if not load_existing_vars:
                 init = tf.global_variables_initializer()
@@ -238,12 +239,16 @@ class HMLSTMNetwork(object):
             saver.save(sess, self._save_path)
 
     def predict(self, signal, reuse=True):
-        if self._prediction_graph is None:
-            truncate_len = len(signal)
-            self._prediction_graph = self.create_network(self.output_module, 1,
-                                                   truncate_len, reuse)
+        batch_size = 1
+        truncate_len = len(signal)
+        key = (batch_size, truncate_len)
+        if self._training_graph.get(key) is None:
+            self._training_graph[key] = self.create_network(self.output_module,
+                                                       batch_size,
+                                                       truncate_len, reuse)
 
-        _, _, _, predictions = self._prediction_graph
+
+        _, _, _, predictions = self._training_graph[key]
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
@@ -258,12 +263,15 @@ class HMLSTMNetwork(object):
         return np.array(_predictions)
 
     def predict_boundaries(self, signal, reuse=True):
-        if self._prediction_graph is None:
-            truncate_len = len(signal)
-            self._prediction_graph = self.create_network(self.output_module, 1,
-                                                   truncate_len, reuse)
+        batch_size = 1
+        truncate_len = len(signal)
+        key = (batch_size, truncate_len)
+        if self._training_graph.get(key) is None:
+            self._training_graph[key] = self.create_network(self.output_module,
+                                                       batch_size,
+                                                       truncate_len, reuse)
 
-        _, _, indicators, _ = self._prediction_graph
+        _, _, indicators, _ = self._training_graph[key]
 
         saver = tf.train.Saver()
         with tf.Session() as sess:

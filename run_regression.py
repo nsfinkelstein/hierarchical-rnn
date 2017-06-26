@@ -8,7 +8,7 @@ from string import ascii_lowercase
 
 # simulate multiresolution data
 num_signals = 10
-signal_length = 3
+signal_length = 4
 x = np.linspace(0, 40 * np.pi, signal_length)
 signals = [np.random.normal(0, 1, size=signal_length) 
            + (5 * np.sin(1 * x + np.random.random() * 100 * np.pi))
@@ -44,7 +44,6 @@ while start + batch_size < len(test):
     test_batches_out.append(np.array([s[1:] for s in batch]).reshape(batch_size, -1, 1))
 
     start += batch_size
-# tf.reset_default_graph()
 
 network = HMLSTMNetwork(input_size=1, task='regression', hidden_state_sizes=[10, 20, 30],
                        embed_size=20, out_hidden_size=10, num_layers=3)

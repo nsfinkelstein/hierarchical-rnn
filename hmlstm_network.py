@@ -54,19 +54,19 @@ class HMLSTMNetwork(object):
         self._initialize_embedding_variables()
 
     def _initialize_gate_variables(self):
-        with vs.variable_scope('gates'):
+        with vs.variable_scope('gates_vars'):
             for l in range(self._num_layers):
                 vs.get_variable(
                     'gate_%s' % l, [sum(self._hidden_state_sizes), 1],
                     dtype=tf.float32)
 
     def _initialize_embedding_variables(self):
-        with vs.variable_scope('embedding'):
+        with vs.variable_scope('embedding_vars'):
             embed_shape = [sum(self._hidden_state_sizes), self._embed_size]
             vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
     def _initialize_output_variables(self):
-        with vs.variable_scope('output_module'):
+        with vs.variable_scope('output_module_vars'):
             vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
             vs.get_variable('b3', [1, self._output_size], dtype=tf.float32)
@@ -82,18 +82,17 @@ class HMLSTMNetwork(object):
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
-        with vs.variable_scope('gates', reuse=True):
+        with vs.variable_scope('gates_vars', reuse=True):
             gates = []
             for l in range(self._num_layers):
-                weights = vs.get_variable(
-                    'gate_%s' % l, [sum(self._hidden_state_sizes), 1],
-                    dtype=tf.float32)
+                weights = vs.get_variable('gate_%d' % l, dtype=tf.float32)
                 gates.append(tf.sigmoid(tf.matmul(hidden_states, weights)))
 
             split = array_ops.split(
                 value=hidden_states,
-                num_or_size_splits=self._num_layers,
+                num_or_size_splits=self._hidden_state_sizes,
                 axis=1)
+
             gated_list = []
             for gate, hidden_state in zip(gates, split):
                 gated_list.append(tf.multiply(gate, hidden_state))
@@ -102,12 +101,8 @@ class HMLSTMNetwork(object):
         return gated_input
 
     def embed_input(self, gated_input):
-        with vs.variable_scope('embedding', reuse=True):
-
-            in_size = sum(self._hidden_state_sizes)
-            embed_shape = [in_size, self._embed_size]
-            embed_weights = vs.get_variable(
-                'embed_weights', embed_shape, dtype=tf.float32)
+        with vs.variable_scope('embedding_vars', reuse=True):
+            embed_weights = vs.get_variable('embed_weights', dtype=tf.float32)
 
             prod = tf.matmul(gated_input, embed_weights)
             embedding = tf.nn.relu(prod)
@@ -115,7 +110,7 @@ class HMLSTMNetwork(object):
         return embedding
 
     def output_module(self, embedding, time_step):
-        with vs.variable_scope('output_module', reuse=True):
+        with vs.variable_scope('output_module_vars', reuse=True):
             b1 = vs.get_variable('b1')
             b2 = vs.get_variable('b2')
             b3 = vs.get_variable('b3')
@@ -132,7 +127,7 @@ class HMLSTMNetwork(object):
 
             # the loss function used below
             # softmax_cross_entropy_with_logits
-            prediction = tf.matmul(l2, w3) + b3
+            prediction = tf.add(tf.matmul(l2, w3), b3, name='prediction')
 
             loss_args = {
                 self._prediction_arg: tf.squeeze(prediction),
@@ -165,33 +160,35 @@ class HMLSTMNetwork(object):
 
         state = hmlstm.zero_state(batch_size, tf.float32)
         ha_shape = [batch_size, 1, sum(self._hidden_state_sizes)]
-        h_aboves = tf.zeros(ha_shape)
+        h_aboves = tf.zeros(ha_shape, name='h_aboves')
 
-        loss = tf.constant(0.0)
+        loss = tf.constant(0.0, name='loss')
         indicators = []
         predictions = []
         for i in range(truncate_len):
             inputs = array_ops.concat(
-                (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
+                (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2,
+                name='concat_value_and_h_aboves')
 
             hidden_states, state = hmlstm(inputs, state)
 
-            concated_hs = array_ops.concat(hidden_states[1:], axis=1)
+            concated_hs = array_ops.concat(hidden_states[1:], axis=1, name='concat_h_aboves')
 
             h_above_for_last_layer = tf.zeros(
-                [batch_size, hmlstm._cells[-1]._h_above_size], dtype=tf.float32)
+                [batch_size, hmlstm._cells[-1]._h_above_size], dtype=tf.float32
+                , name='habove_for_last_layer')
 
             h_aboves = array_ops.concat(
-                [concated_hs, h_above_for_last_layer], axis=1)
+                [concated_hs, h_above_for_last_layer], axis=1, name='final_h_aboves')
             h_aboves = tf.expand_dims(h_aboves, 1)
 
             gated = self.gate_input(array_ops.concat(hidden_states, axis=1))
             embeded = self.embed_input(gated)
             new_loss, new_prediction = output_module(embeded, i)
-            loss += tf.reduce_mean(new_loss)
+            loss += tf.reduce_mean(new_loss, name='loss_mean')
 
             predictions.append(new_prediction)
-            indicators.append([z for c, h, z in state])
+            indicators.append([s.z for s in state])
 
         train = self._optimizer.minimize(loss)
         return train, loss, indicators, predictions
@@ -214,6 +211,10 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            def debug(d, t):
+                return 'xxx' in d.node_name
+            sess.add_tensor_filter('debug', debug)
 
             if not load_existing_vars:
                 init = tf.global_variables_initializer()
@@ -266,8 +267,6 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
-            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            sess.add_tensor_filter('debug', lambda d, t: 'yyy' in d.node_name)
 
             print('loading variables...')
             saver.restore(sess, self._save_path)

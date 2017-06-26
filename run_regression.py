@@ -8,7 +8,7 @@ from string import ascii_lowercase
 
 # simulate multiresolution data
 num_signals = 10
-signal_length = 10
+signal_length = 3
 x = np.linspace(0, 40 * np.pi, signal_length)
 signals = [np.random.normal(0, 1, size=signal_length) 
            + (5 * np.sin(1 * x + np.random.random() * 100 * np.pi))
@@ -22,7 +22,7 @@ test = signals[split:]
 # prepare data
 train_batches_in = []
 train_batches_out = []
-batch_size = 2
+batch_size = 1
 start = 0
 while start + batch_size < len(train):
     batch = train[start: start + batch_size]
@@ -49,5 +49,9 @@ while start + batch_size < len(test):
 network = HMLSTMNetwork(input_size=1, task='regression', hidden_state_sizes=[10, 20, 30],
                        embed_size=20, out_hidden_size=10, num_layers=3)
 
-network.train(train_batches_in, train_batches_out, load_existing_vars=False)
+network.train(train_batches_in, train_batches_out, load_existing_vars=False, epochs=1)
+
+writer = tf.summary.FileWriter('log/', graph=tf.get_default_graph())
+
 boundaries = network.predict_boundaries(test_batches_in[0][0])
+print(boundaries)

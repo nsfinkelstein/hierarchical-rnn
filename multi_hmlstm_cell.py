@@ -2,6 +2,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import variable_scope as vs
+from hmlstm_cell import HMLSTMState
 import tensorflow as tf
 
 
@@ -39,20 +40,24 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         h_aboves = array_ops.split(value=raw_h_aboves,
                                    num_or_size_splits=ha_splits, axis=2)
 
-        z_below = tf.ones([tf.shape(inputs)[0], 1, 1])
-        raw_inp = array_ops.concat([raw_inp, z_below], axis=2)
+        z_below = tf.ones([tf.shape(inputs)[0], 1, 1], name='zs_below')
+        raw_inp = array_ops.concat([raw_inp, z_below], axis=2, name='initial_raw_input')
 
-        new_states = []
+        new_states = [0] * len(self._cells)
         for i, cell in enumerate(self._cells):
             with vs.variable_scope("cell_%d" % i):
                 cur_state = state[i]
-                # cur_state = (cur_state[0], cur_state[1], tf.identity(cur_state[2], name='yyy'))
+
+                # cur_state = self._cells[i].zero_state(tf.shape(inputs)[0], tf.float32)
+                # cur_state = HMLSTMState(c=cur_state[0], h=cur_state[1], z=tf.identity(cur_state[2], name='vvv' + str(i)))
+
+                # self.all_zs.append(tf.identity( cur_state.z, name='yyy' ))
 
                 cur_inp = array_ops.concat(
                     [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
                 raw_inp, new_state = cell(cur_inp, cur_state)
                 raw_inp = tf.expand_dims(raw_inp, 1)
-                new_states.append(new_state)
+                new_states[i] = new_state
 
-        hidden_states = [ns[1] for ns in new_states]
+        hidden_states = [ns.h for ns in new_states]
         return hidden_states, new_states

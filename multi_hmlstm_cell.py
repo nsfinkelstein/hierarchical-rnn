@@ -28,21 +28,25 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
 
     def call(self, inputs, state):
         """Run this multi-layer cell on inputs, starting from state."""
-        raw_inp = inputs[:, :, :-sum(c._num_units for c in self._cells)]
+
+        total_hidden_size = sum(c._h_above_size for c in self._cells)
 
         # split out the part of the input that stores values of ha
-        raw_h_aboves = inputs[:, :, -sum(c._h_above_size for c in self._cells):]
+        raw_inp = inputs[:, :, :-total_hidden_size]
+        raw_h_aboves = inputs[:, :, -total_hidden_size:]
+
+        ha_splits = [c._h_above_size for c in self._cells]
         h_aboves = array_ops.split(value=raw_h_aboves,
-                                   num_or_size_splits=[c._h_above_size for c in self._cells], axis=2)
+                                   num_or_size_splits=ha_splits, axis=2)
 
         z_below = tf.ones([tf.shape(inputs)[0], 1, 1])
-
         raw_inp = array_ops.concat([raw_inp, z_below], axis=2)
 
         new_states = []
         for i, cell in enumerate(self._cells):
             with vs.variable_scope("cell_%d" % i):
                 cur_state = state[i]
+                # cur_state = (cur_state[0], cur_state[1], tf.identity(cur_state[2], name='yyy'))
 
                 cur_inp = array_ops.concat(
                     [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
@@ -51,4 +55,4 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
                 new_states.append(new_state)
 
         hidden_states = [ns[1] for ns in new_states]
-        return hidden_states, tuple(new_states)
+        return hidden_states, new_states

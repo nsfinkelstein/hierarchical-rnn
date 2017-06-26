@@ -31,18 +31,27 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return HMLSTMState(
             c=tf.zeros([batch_size, self._num_units]),
             h=tf.zeros([batch_size, self._num_units]),
-            z=tf.zeros([batch_size]))
+            z=tf.zeros([batch_size], name='original_yyy'))
 
     def call(self, inputs, state):
         """Hierarchical multi-scale long short-term memory cell (HMLSTM)"""
         c, h, z = state
+        
+        # c=tf.identity(c, name='xxx_c')
+        # h=tf.identity(h, name='xxx_h')
+        z=tf.identity(z, name='xxx_z')
 
         in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
         hb, zb, ha = array_ops.split(
             value=inputs,
             num_or_size_splits=in_splits,
             axis=2,
-            name='split_input')
+            name='split')
+        
+        # hb=tf.identity(hb, name='xxx_hb')
+        zb=tf.identity(zb, name='xxx_zb')
+        # ha=tf.identity(ha, name='xxx_ha')
+
 
         s_recurrent = h
         expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
@@ -67,6 +76,13 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = self.calculate_new_indicator(z_tilde)
+        
+        # new_c=tf.identity(new_c, name='xxx_new_c')
+        # new_h=tf.identity(new_h, name='xxx_new_h')
+        new_z=tf.identity(new_z, name='xxx_new_z')
+
+
+
 
         output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
         new_state = HMLSTMState(new_c, new_h, new_z)
@@ -89,26 +105,28 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                 return tf.multiply(i[b], g[b], name='c')
 
             new_c[b] = tf.case(
-                [
-                    (tf.equal(
-                        tf.squeeze(z[b]), tf.constant(1., dtype=tf.float32)),
-                     flush_c),
-                    (tf.logical_and(
+                {
+                    tf.equal(
+                        tf.squeeze(z[b]), tf.constant(1., dtype=tf.float32)
+                    ): flush_c,
+                    tf.logical_and(
                         tf.equal(
-                            tf.squeeze(z[b]), tf.constant(
-                                0., dtype=tf.float32), name='equal'),
-                        tf.equal(
-                            tf.squeeze(zb[b]),
-                            tf.constant(0., dtype=tf.float32), name='equal')), copy_c),
-                    (tf.logical_and(
-                        tf.equal(
-                            tf.squeeze(z[b]), tf.constant(
-                                0., dtype=tf.float32), name='equal'),
+                            tf.squeeze(z[b]),
+                            tf.constant(0., dtype=tf.float32)),
                         tf.equal(
                             tf.squeeze(zb[b]),
-                            tf.constant(1., dtype=tf.float32), name='equal')), update_c),
-                ],
-                default=update_c,
+                            tf.constant(0., dtype=tf.float32))
+                    ): copy_c,
+                    tf.logical_and(
+                        tf.equal(
+                            tf.squeeze(z[b]),
+                            tf.constant(0., dtype=tf.float32)),
+                        tf.equal(
+                            tf.squeeze(zb[b]),
+                            tf.constant(1., dtype=tf.float32))
+                    ): update_c,
+                },
+                default=copy_c,
                 exclusive=True)
 
         return tf.stack(new_c, axis=0)
@@ -126,9 +144,11 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
             new_h[b] = tf.cond(
                 tf.logical_and(
                     tf.equal(
-                        tf.squeeze(z[b]), tf.constant(0., dtype=tf.float32), name='equal'),
+                        tf.squeeze(z[b]),
+                        tf.constant(0., dtype=tf.float32)),
                     tf.equal(
-                        tf.squeeze(zb[b]), tf.constant(0., dtype=tf.float32), name='equal')),
+                        tf.squeeze(zb[b]),
+                        tf.constant(0., dtype=tf.float32))),
                 copy_h, update_h)
         return tf.stack(new_h, axis=0)
 

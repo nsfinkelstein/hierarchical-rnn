@@ -175,9 +175,12 @@ class HMLSTMNetwork(object):
                 (self.batch_in[:, i:(i + 1), :], h_aboves), axis=2)
 
             hidden_states, state = hmlstm(inputs, state)
+
             concated_hs = array_ops.concat(hidden_states[1:], axis=1)
+
             h_above_for_last_layer = tf.zeros(
-                [batch_size, self._hidden_state_sizes[0]], dtype=tf.float32)
+                [batch_size, hmlstm._cells[-1]._h_above_size], dtype=tf.float32)
+
             h_aboves = array_ops.concat(
                 [concated_hs, h_above_for_last_layer], axis=1)
             h_aboves = tf.expand_dims(h_aboves, 1)
@@ -211,6 +214,7 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+
             if not load_existing_vars:
                 init = tf.global_variables_initializer()
                 sess.run(init)
@@ -262,8 +266,8 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
-            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            # sess.add_tensor_filter('equal', lambda d, t: 'equal' in d.node_name)
+            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            sess.add_tensor_filter('debug', lambda d, t: 'yyy' in d.node_name)
 
             print('loading variables...')
             saver.restore(sess, self._save_path)

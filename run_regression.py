@@ -49,8 +49,8 @@ network = HMLSTMNetwork(input_size=1, task='regression', hidden_state_sizes=[10,
                        embed_size=20, out_hidden_size=10, num_layers=3)
 
 network.train(train_batches_in, train_batches_out, load_existing_vars=False, epochs=1)
-
 writer = tf.summary.FileWriter('log/', graph=tf.get_default_graph())
 
+boundaries = network.predict(test_batches_in[0][0])
 boundaries = network.predict_boundaries(test_batches_in[0][0])
 print(boundaries)

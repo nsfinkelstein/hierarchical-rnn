@@ -14,10 +14,7 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         self._cells = cells
 
     def zero_state(self, batch_size, dtype):
-        name = type(self).__name__ + 'ZeroState'
-        with ops.name_scope(name, values=[batch_size]):
-            return tuple(
-                cell.zero_state(batch_size, dtype) for cell in self._cells)
+        return [cell.zero_state(batch_size, dtype) for cell in self._cells]
 
     @property
     def state_size(self):

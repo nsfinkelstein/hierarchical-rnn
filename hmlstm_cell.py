@@ -28,7 +28,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return self._num_units + 1
 
     def zero_state(self, batch_size, dtype):
-        c = tf.zeros([batch_size, self._num_units], name='fisrt_c_xxx')
+        c = tf.zeros([batch_size, self._num_units], name='first_c_xxx')
         h = tf.zeros([batch_size, self._num_units], name='first_h_xxx')
         z = tf.zeros([batch_size], name='first_z_xxx')
         return HMLSTMState(c=c, h=h, z=z)
@@ -39,9 +39,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         h = state.h
         z = state.z
 
-        c=tf.identity(c, name='xxx_c')
-        h=tf.identity(h, name='xxx_h')
-        z=tf.identity(z, name='xxx_z')
+        # c=tf.identity(c, name='xxx_c')
+        # h=tf.identity(h, name='xxx_h')
+        # z=tf.identity(z, name='xxx_z')
 
         in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
         hb, zb, ha = array_ops.split(
@@ -50,9 +50,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
             axis=2,
             name='split')
         
-        hb=tf.identity(hb, name='xxx_hb')
-        zb=tf.identity(zb, name='xxx_zb')
-        ha=tf.identity(ha, name='xxx_ha')
+        # hb=tf.identity(hb, name='xxx_hb')
+        # zb=tf.identity(zb, name='xxx_zb')
+        # ha=tf.identity(ha, name='xxx_ha')
 
         s_recurrent = h
         expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
@@ -62,7 +62,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         length = 4 * self._num_units + 1
         states = [s_recurrent, s_above, s_below]
 
-        concat = rnn_cell_impl._linear(states, length, bias=True)
+        bias_init = tf.constant_initializer(-1e5, dtype=tf.float32)
+        concat = rnn_cell_impl._linear(states, length, bias=False,
+                                       bias_initializer=bias_init)
 
         gate_splits = tf.constant(
             ([self._num_units] * 4) + [1], dtype=tf.int32)
@@ -79,9 +81,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = self.calculate_new_indicator(z_tilde)
         
-        new_c=tf.identity(new_c, name='xxx_new_c')
-        new_h=tf.identity(new_h, name='xxx_new_h')
-        new_z = tf.identity(new_z, name='xxx_new_z')
+        # new_c=tf.identity(new_c, name='xxx_new_c')
+        # new_h=tf.identity(new_h, name='xxx_new_h')
+        # new_z = tf.identity(new_z, name='xxx_new_z')
 
         output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
         new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
@@ -114,10 +116,10 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                     ): flush_c,
                     tf.logical_and(
                         tf.equal(
-                            tf.squeeze(z[b]),
+                            tf.squeeze(z[b], name='squeeze_z_xxx'),
                             tf.constant(0., dtype=tf.float32)),
                         tf.equal(
-                            tf.squeeze(zb[b]),
+                            tf.squeeze(zb[b], name='squeeze_zb_xxx'),
                             tf.constant(0., dtype=tf.float32)),
                         name='copy_c_xxx'
                     ): copy_c,
@@ -141,7 +143,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         for b in range(self._batch_size):
 
             def copy_h():
-                return tf.identity( h[b] )
+                return tf.identity(h[b])
 
             def update_h():
                 return tf.multiply(o[b], tf.tanh(new_c[b]))

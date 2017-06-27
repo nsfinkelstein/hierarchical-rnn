@@ -1,4 +1,4 @@
-from hmlstm_cell import HMLSTMCell
+from hmlstm_cell import HMLSTMCell, HMLSTMState
 from multi_hmlstm_cell import MultiHMLSTMCell
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variable_scope as vs
@@ -172,6 +172,11 @@ class HMLSTMNetwork(object):
 
             hidden_states, state = hmlstm(inputs, state)
 
+            # if i == 0:
+            #     # there can be no boundaries on the first step
+            #     state = [HMLSTMState(c=s.c, h=s.h, z=tf.zeros([batch_size]))
+            #              for s in state]
+
             concated_hs = array_ops.concat(hidden_states[1:], axis=1, name='concat_h_aboves')
 
             h_above_for_last_layer = tf.zeros(
@@ -212,10 +217,6 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
-            #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            #def debug(d, t):
-            #    return 'xxx' in d.node_name
-            #sess.add_tensor_filter('debug', debug)
 
             if not load_existing_vars:
                 init = tf.global_variables_initializer()
@@ -252,6 +253,8 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            # sess.add_tensor_filter('debug', lambda d, t: 'xxx' in d.node_name)
 
             print('loading variables...')
             saver.restore(sess, self._save_path)
@@ -275,6 +278,8 @@ class HMLSTMNetwork(object):
 
         saver = tf.train.Saver()
         with tf.Session() as sess:
+            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            # sess.add_tensor_filter('debug', lambda d, t: 'xxx' in d.node_name)
 
             print('loading variables...')
             saver.restore(sess, self._save_path)

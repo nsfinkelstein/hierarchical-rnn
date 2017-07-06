@@ -138,7 +138,7 @@ class HMLSTMNetwork(object):
             scalar_loss = tf.reduce_mean(loss, name='loss_mean')
         return scalar_loss, prediction
 
-    def create_network(self, output_module, batch_size, truncate_len, reuse):
+    def create_multicell(self, batch_size, reuse):
         def hmlstm_cell(layer):
             if layer == 0:
                 h_below_size = self._input_size
@@ -157,6 +157,14 @@ class HMLSTMNetwork(object):
 
         hmlstm = MultiHMLSTMCell(
             [hmlstm_cell(l) for l in range(self._num_layers)], reuse=reuse)
+
+        return hmlstm
+
+    def dynamic_network(self, output_module, batch_size, reuse):
+        pass
+        
+    def unrolled_network(self, output_module, batch_size, truncate_len, reuse):
+        hmlstm = self.create_multicell(batch_size, reuse)
 
         state = hmlstm.zero_state(batch_size, tf.float32)
         ha_shape = [batch_size, 1, sum(self._hidden_state_sizes)]
@@ -209,7 +217,7 @@ class HMLSTMNetwork(object):
         truncate_len = len(batches_in[0][0])
         key = (batch_size, truncate_len)
         if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.create_network(self.output_module,
+            self._training_graph[key] = self.unrolled_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)
 
@@ -244,7 +252,7 @@ class HMLSTMNetwork(object):
         truncate_len = len(signal)
         key = (batch_size, truncate_len)
         if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.create_network(self.output_module,
+            self._training_graph[key] = self.unrolled_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)
 
@@ -270,7 +278,7 @@ class HMLSTMNetwork(object):
         truncate_len = len(signal)
         key = (batch_size, truncate_len)
         if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.create_network(self.output_module,
+            self._training_graph[key] = self.unrolled_network(self.output_module,
                                                        batch_size,
                                                        truncate_len, reuse)
 

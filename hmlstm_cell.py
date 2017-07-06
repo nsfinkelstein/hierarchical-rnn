@@ -66,7 +66,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         s_below = tf.squeeze(tf.multiply(zb, hb), axis=1, name='s_below')
 
         length = 4 * self._num_units + 1
-        states = [s_recurrent, s_above, s_below]
+        states = [tf.squeeze( s_recurrent, axis=0 ), tf.squeeze( s_above, axis=0 ), s_below]
 
         bias_init = tf.constant_initializer(-1e5, dtype=tf.float32)
         concat = rnn_cell_impl._linear(states, length, bias=False,
@@ -85,7 +85,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
-        new_z = tf.expand_dims(self.calculate_new_indicator(z_tilde), -1)
+        new_z = tf.expand_dims( tf.expand_dims(self.calculate_new_indicator(z_tilde), -1), -1 )
         
         # new_c=tf.identity(new_c, name='xxx_new_c')
         # new_h=tf.identity(new_h, name='xxx_new_h')
@@ -94,6 +94,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         output = array_ops.concat((new_h, new_z), axis=1)
         new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
 
+        print(new_state)
         return output, new_state
 
     def calculate_new_cell_state(self, c, g, i, f, z, zb):

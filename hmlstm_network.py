@@ -44,7 +44,7 @@ class HMLSTMNetwork(object):
         else:
             raise ValueError('Not a valid task')
 
-        batch_shape = (None, None, self._output_size)
+        batch_shape = (1, 3, self._output_size)
         self.batch_in = tf.placeholder(
             tf.float32, shape=batch_shape, name='batch_in')
         self.batch_out = tf.placeholder(
@@ -168,7 +168,7 @@ class HMLSTMNetwork(object):
             splits += [size, size, 1]
 
         split_states = array_ops.split(value=accum,
-                                        num_or_size_splits=splits, axis=1)
+                                        num_or_size_splits=splits, axis=2)
 
         cell_states = []
         for l in range(self._num_layers):
@@ -191,18 +191,24 @@ class HMLSTMNetwork(object):
                                          batch_size, hmlstm)
 
             hmlstm_in = array_ops.concat((elem, h_aboves), axis=2)
+
+            h_aboves = tf.expand_dims(h_aboves, 1)
             _, state = hmlstm(hmlstm_in, cell_states)
 
-            return array_ops.concat([array_ops.concat(s, axis=1)
-                                     for s in state], axis=1)
+            print(tuple(state[0]))
+
+            concated_states = [array_ops.concat(tuple(s), axis=2) for s in state]
+            print( concated_states )
+
+            return array_ops.concat(concated_states, axis=2)
 
         elem_len = (sum(self._hidden_state_sizes) * 2) + self._num_layers
-        initial = tf.zeros([batch_size, elem_len])
+        initial = tf.zeros([batch_size, 1, elem_len])
 
         elems = tf.unstack(self.batch_in, num=truncate_len, axis=1)
-        squeezed_elems = [tf.squeeze(e) for e in elems]
+        restacked = tf.expand_dims( tf.stack(elems, axis=0), axis=-1)
+        result = tf.scan(scan_func, restacked, initial)
 
-        result = tf.scan(scan_func, squeezed_elems, initial)
         hidden_states = [self.split_out_cell_states(s)
                          for s in tf.unstack(result, num=truncate_len, axis=0)]
 
@@ -257,16 +263,14 @@ class HMLSTMNetwork(object):
             return self.unrolled_network(*args, **kwargs)
 
     def get_h_aboves(self, hidden_states, batch_size, hmlstm):
-        concated_hs = array_ops.concat(hidden_states[1:], axis=1, name='concat_h_aboves')
+        concated_hs = array_ops.concat(hidden_states[1:], axis=2, name='concat_h_aboves')
 
         h_above_for_last_layer = tf.zeros(
-            [batch_size, hmlstm._cells[-1]._h_above_size], dtype=tf.float32
+            [batch_size, 1, hmlstm._cells[-1]._h_above_size], dtype=tf.float32
             , name='habove_for_last_layer')
 
         h_aboves = array_ops.concat(
-            [concated_hs, h_above_for_last_layer], axis=1, name='final_h_aboves')
-
-        h_aboves = tf.expand_dims(h_aboves, 1)
+            [concated_hs, h_above_for_last_layer], axis=2, name='final_h_aboves')
 
         return h_aboves
 

@@ -49,7 +49,7 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
                     [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
 
                 raw_inp, new_state = cell(cur_inp, cur_state)
-                raw_inp = tf.expand_dims(raw_inp, 1)
+                raw_inp = raw_inp
                 new_states[i] = new_state
 
         hidden_states = [ns.h for ns in new_states]

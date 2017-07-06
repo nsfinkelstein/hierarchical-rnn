@@ -162,25 +162,30 @@ class HMLSTMNetwork(object):
 
         return hmlstm
 
+    def split_out_cell_states(self, accum):
+        splits = []
+        for size in self._hidden_state_sizes:
+            splits += [size, size, 1]
+
+        split_states = array_ops.split(value=accum,
+                                        num_or_size_splits=splits, axis=1)
+
+        cell_states = []
+        for l in range(self._num_layers):
+            c = split_states[(l * 3)]
+            h = split_states[(l * 3) + 1]
+            z = split_states[(l * 3) + 2]
+            cell_states.append(HMLSTMState(c=c, h=h, z=z))
+
+        return cell_states
+
     def dynamic_network(self, output_module, batch_size, truncate_len, reuse):
         hmlstm = self.create_multicell(batch_size, reuse)
 
         def scan_func(accum, elem):
             # each element is the set of all hidden states from the previous
             # time step
-            splits = []
-            for size in self._hidden_state_sizes:
-                splits += [size, size, 1]
-
-            split_states = array_ops.split(value=accum,
-                                           num_or_size_splits=splits, axis=1)
-
-            cell_states = []
-            for l in range(self._num_layers):
-                c = split_states[(l * 3)]
-                h = split_states[(l * 3) + 1]
-                z = split_states[(l * 3) + 2]
-                cell_states.append(HMLSTMState(c=c, h=h, z=z))
+            cell_states = self.split_out_cell_states(accum)
 
             h_aboves = self.get_h_aboves([cs.h for cs in cell_states],
                                          batch_size, hmlstm)
@@ -197,8 +202,23 @@ class HMLSTMNetwork(object):
         elems = tf.unstack(self.batch_in, num=truncate_len, axis=1)
         squeezed_elems = [tf.squeeze(e) for e in elems]
 
-        hidden_states = tf.scan(scan_func, squeezed_elems, initial)
-        print(hidden_states)
+        result = tf.scan(scan_func, squeezed_elems, initial)
+        hidden_states = [self.split_out_cell_states(s)
+                         for s in tf.unstack(result, num=truncate_len, axis=0)]
+
+        loss = tf.constant(0.0)
+        predictions = []
+        for i, hs in zip(range(truncate_len), hidden_states):
+
+            gated = self.gate_input(array_ops.concat([s.h for s in hs], axis=1))
+            embeded = self.embed_input(gated)
+            new_loss, new_prediction = output_module(embeded, i)
+            loss += new_loss
+
+        train = self._optimizer.minimize(loss)
+        indicators = [[l.z for l in layers] for layers in hidden_states]
+
+        return train, loss, indicators, predictions
 
     def unrolled_network(self, output_module, batch_size, truncate_len, reuse):
         hmlstm = self.create_multicell(batch_size, reuse)

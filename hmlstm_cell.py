@@ -44,6 +44,12 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         # z=tf.identity(z, name='xxx_z')
 
         in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
+
+        # print([self._h_below_size, 1, self._h_above_size])
+        # print('between')
+        # print(inputs)
+        # print('end')
+
         hb, zb, ha = array_ops.split(
             value=inputs,
             num_or_size_splits=in_splits,
@@ -55,7 +61,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         # ha=tf.identity(ha, name='xxx_ha')
 
         s_recurrent = h
-        expanded_z = tf.expand_dims(tf.expand_dims(z, -1), -1)
+        expanded_z = tf.expand_dims(z, -1)
         s_above = tf.squeeze(tf.multiply(expanded_z, ha), axis=1, name='s_above')
         s_below = tf.squeeze(tf.multiply(zb, hb), axis=1, name='s_below')
 
@@ -79,13 +85,13 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
-        new_z = self.calculate_new_indicator(z_tilde)
+        new_z = tf.expand_dims(self.calculate_new_indicator(z_tilde), -1)
         
         # new_c=tf.identity(new_c, name='xxx_new_c')
         # new_h=tf.identity(new_h, name='xxx_new_h')
         # new_z = tf.identity(new_z, name='xxx_new_z')
 
-        output = array_ops.concat((new_h, tf.expand_dims(new_z, -1)), axis=1)
+        output = array_ops.concat((new_h, new_z), axis=1)
         new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
 
         return output, new_state

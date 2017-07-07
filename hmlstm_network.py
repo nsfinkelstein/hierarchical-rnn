@@ -2,7 +2,6 @@ from hmlstm_cell import HMLSTMCell, HMLSTMState
 from multi_hmlstm_cell import MultiHMLSTMCell
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variable_scope as vs
-from tensorflow.python import debug as tf_debug
 import tensorflow as tf
 import numpy as np
 
@@ -15,16 +14,14 @@ class HMLSTMNetwork(object):
                  hidden_state_sizes=50,
                  out_hidden_size=100,
                  embed_size=100,
-                 task='classification',
-                 save_path='./hmlstm.ckpt'):
+                 task='classification'):
 
         self._out_hidden_size = out_hidden_size
         self._embed_size = embed_size
         self._num_layers = num_layers
-        self._save_path = save_path
         self._input_size = input_size
-        self._training_graph = dict()
-        self._prediction_graph = None
+        self._session = None
+        self._graph = dict()
 
         if type(hidden_state_sizes) == int:
             self._hidden_state_sizes = [hidden_state_sizes] * self._num_layers
@@ -34,13 +31,9 @@ class HMLSTMNetwork(object):
         if task == 'classification':
             self._loss_function = tf.nn.softmax_cross_entropy_with_logits
             self._output_size = output_size
-            self._prediction_arg = 'logits'
         elif task == 'regression':
-            self._loss_function = lambda predictions, labels: tf.square((predictions - labels))
+            self._loss_function = lambda logits, labels: tf.square((logits - labels))
             self._output_size = 1
-            self._prediction_arg = 'predictions'
-        else:
-            raise ValueError('Not a valid task')
 
         batch_shape = (None, None, self._output_size)
         self.batch_in = tf.placeholder(
@@ -48,44 +41,25 @@ class HMLSTMNetwork(object):
         self.batch_out = tf.placeholder(
             tf.float32, shape=batch_shape, name='batch_out')
 
-        self._optimizer = tf.train.AdamOptimizer(1e-3)
-        self._initialize_output_variables()
-        self._initialize_gate_variables()
-        self._initialize_embedding_variables()
+    def load_variables(self, path='./hmlstm_ckpt'):
+        if self._session is None:
+            self._session = tf.Session()
 
-    def _initialize_gate_variables(self):
-        with vs.variable_scope('gates_vars'):
-            for l in range(self._num_layers):
-                vs.get_variable(
-                    'gate_%s' % l, [sum(self._hidden_state_sizes), 1],
-                    dtype=tf.float32)
+        saver = tf.train.Saver()
+        print('loading variables...')
+        saver.restore(self._session, path)
 
-    def _initialize_embedding_variables(self):
-        with vs.variable_scope('embedding_vars'):
-            embed_shape = [sum(self._hidden_state_sizes), self._embed_size]
-            vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
-
-    def _initialize_output_variables(self):
-        with vs.variable_scope('output_module_vars'):
-            vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
-            vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
-            vs.get_variable('b3', [1, self._output_size], dtype=tf.float32)
-            vs.get_variable(
-                'w1', [self._embed_size, self._out_hidden_size],
-                dtype=tf.float32)
-            vs.get_variable(
-                'w2', [self._out_hidden_size, self._out_hidden_size],
-                dtype=tf.float32)
-            vs.get_variable(
-                'w3', [self._out_hidden_size, self._output_size],
-                dtype=tf.float32)
+    def save_variables(self, path='./hmlstm_ckpt'):
+        saver = tf.train.Saver()
+        print('saving variables...')
+        saver.save(self._session, path)
 
     def gate_input(self, hidden_states):
         # gate the incoming hidden states
-        with vs.variable_scope('gates_vars', reuse=True):
+        with vs.variable_scope('gates_vars'):
             gates = []
             for l in range(self._num_layers):
-                weights = vs.get_variable('gate_%d' % l, dtype=tf.float32)
+                weights = vs.get_variable('gate_%d' % l, [sum(self._hidden_state_sizes), 1], dtype=tf.float32)
                 gates.append(tf.sigmoid(tf.matmul(hidden_states, weights)))
 
             split = array_ops.split(
@@ -101,8 +75,9 @@ class HMLSTMNetwork(object):
         return gated_input
 
     def embed_input(self, gated_input):
-        with vs.variable_scope('embedding_vars', reuse=True):
-            embed_weights = vs.get_variable('embed_weights', dtype=tf.float32)
+        with vs.variable_scope('embedding_vars'):
+            embed_shape = [sum(self._hidden_state_sizes), self._embed_size]
+            embed_weights = vs.get_variable('embed_weights', embed_shape, dtype=tf.float32)
 
             prod = tf.matmul(gated_input, embed_weights)
             embedding = tf.nn.relu(prod)
@@ -110,13 +85,13 @@ class HMLSTMNetwork(object):
         return embedding
 
     def output_module(self, embedding, outcome):
-        with vs.variable_scope('output_module_vars', reuse=True):
-            b1 = vs.get_variable('b1')
-            b2 = vs.get_variable('b2')
-            b3 = vs.get_variable('b3')
-            w1 = vs.get_variable('w1')
-            w2 = vs.get_variable('w2')
-            w3 = vs.get_variable('w3')
+        with vs.variable_scope('output_module_vars'):
+            b1 = vs.get_variable('b1', [1, self._out_hidden_size], dtype=tf.float32)
+            b2 = vs.get_variable('b2', [1, self._out_hidden_size], dtype=tf.float32)
+            b3 = vs.get_variable('b3', [1, self._output_size], dtype=tf.float32)
+            w1 = vs.get_variable('w1', [self._embed_size, self._out_hidden_size], dtype=tf.float32)
+            w2 = vs.get_variable('w2', [self._out_hidden_size, self._out_hidden_size], dtype=tf.float32)
+            w3 = vs.get_variable('w3', [self._out_hidden_size, self._output_size], dtype=tf.float32)
 
             # feed forward network
             # first layer
@@ -129,17 +104,12 @@ class HMLSTMNetwork(object):
             # softmax_cross_entropy_with_logits
             prediction = tf.add(tf.matmul(l2, w3), b3, name='prediction')
 
-            loss_args = {
-                self._prediction_arg: prediction,
-                'labels': outcome,
-            }
-
-            # print(dict( **loss_args ))
-            # stop
+            loss_args = {'logits': prediction, 'labels': outcome}
             loss = self._loss_function(**loss_args)
+
         return loss, prediction
 
-    def create_multicell(self, batch_size, reuse):
+    def create_multicell(self, batch_size):
         def hmlstm_cell(layer):
             if layer == 0:
                 h_below_size = self._input_size
@@ -154,10 +124,10 @@ class HMLSTMNetwork(object):
                 h_above_size = self._hidden_state_sizes[layer + 1]
 
             return HMLSTMCell(self._hidden_state_sizes[layer], batch_size,
-                              h_below_size, h_above_size, reuse)
+                              h_below_size, h_above_size)
 
         hmlstm = MultiHMLSTMCell(
-            [hmlstm_cell(l) for l in range(self._num_layers)], reuse=reuse)
+            [hmlstm_cell(l) for l in range(self._num_layers)])
 
         return hmlstm
 
@@ -167,7 +137,7 @@ class HMLSTMNetwork(object):
             splits += [size, size, 1]
 
         split_states = array_ops.split(value=accum,
-                                        num_or_size_splits=splits, axis=1)
+                                       num_or_size_splits=splits, axis=1)
 
         cell_states = []
         for l in range(self._num_layers):
@@ -189,8 +159,8 @@ class HMLSTMNetwork(object):
 
         return h_aboves
 
-    def dynamic_network(self, output_module, batch_size, truncate_len, reuse):
-        hmlstm = self.create_multicell(batch_size, reuse)
+    def network(self, batch_size, truncate_len):
+        hmlstm = self.create_multicell(batch_size)
 
         def scan_rnn(accum, elem):
             # each element is the set of all hidden states from the previous
@@ -225,7 +195,7 @@ class HMLSTMNetwork(object):
             hs = [s.h for s in self.split_out_cell_states(cell_states)]
             gated = self.gate_input(tf.concat(hs, axis=1))
             embeded = self.embed_input(gated)
-            loss, prediction = output_module(embeded, outcome)
+            loss, prediction = self.output_module(embeded, outcome)
 
             return tf.concat((loss, prediction), axis=1)
 
@@ -233,109 +203,91 @@ class HMLSTMNetwork(object):
 
         loss = tf.reduce_mean(mapped[:, :, 0])
         predictions = mapped[:, :, 1:]
+        train = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
-        train = self._optimizer.minimize(loss)
         return train, loss, indicators, predictions
-
-    def network(self, *args, **kwargs):
-        return self.dynamic_network(*args, **kwargs)
 
     def train(self,
               batches_in,
               batches_out,
-              reuse=None,
-              load_existing_vars=False,
+              load_vars_from_disk=False,
               epochs=3):
 
         truncate_len = len(batches_in[0])
         batch_size = len(batches_in[0][0])
-        key = (batch_size, truncate_len)
-        if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.network(self.output_module,
-                                                       batch_size,
-                                                       truncate_len, reuse)
+        if self._graph.get(batch_size) is None:
+            self._graph[batch_size] = self.network(batch_size, truncate_len)
 
-        optim, loss, _, _ = self._training_graph[key]
+        if self._session is None:
+            self._session = tf.Session()
 
-        saver = tf.train.Saver()
-        with tf.Session() as sess:
+        if not load_vars_from_disk:
+            init = tf.global_variables_initializer()
+            self._session.run(init)
+        else:
+            self.load_variables()
 
-            if not load_existing_vars:
-                init = tf.global_variables_initializer()
-                sess.run(init)
-            elif load_existing_vars:
-                print('loading variables...')
-                saver.restore(sess, self._save_path)
+        optim, loss, _, _ = self._graph[batch_size]
+        for epoch in range(epochs):
+            print('Epoch %d' % epoch)
+            for batch_in, batch_out in zip(batches_in, batches_out):
+                ops = [optim, loss]
+                feed_dict = {
+                    self.batch_in: batch_in,
+                    self.batch_out: batch_out,
+                }
+                _, _loss = self._session.run(ops, feed_dict)
+                print('loss:', _loss)
 
-            for epoch in range(epochs):
-                print('Epoch %d' % epoch)
-                for batch_in, batch_out in zip(batches_in, batches_out):
-                    ops = [optim, loss]
-                    feed_dict = {
-                        self.batch_in: batch_in,
-                        self.batch_out: batch_out,
-                    }
-                    _, _loss = sess.run(ops, feed_dict)
-                    print('loss:', _loss)
+        self.save_variables()
 
-            print('saving variables...')
-            saver.save(sess, self._save_path)
-
-    def predict(self, signal, reuse=True):
+    def predict(self, signal, variable_path=None):
         batch_size = signal.shape[1]
         truncate_len = signal.shape[0]
-        key = (batch_size, truncate_len)
-        if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.network(self.output_module,
-                                                       batch_size,
-                                                       truncate_len, reuse)
+
+        if self._graph.get(batch_size) is None:
+            self._graph[batch_size] = self.network(batch_size, truncate_len)
+
+        if self._session is None:
+            self.load_variables(variable_path)
+            try:
+                self.load_variables(variable_path)
+            except:
+                raise RuntimeError('Session unitialized and no variables saved'
+                                   + ' at provided path %s' % variable_path)
 
 
-        _, _, _, predictions = self._training_graph[key]
+        _, _, _, predictions = self._graph[batch_size]
 
-        saver = tf.train.Saver()
-        with tf.Session() as sess:
-            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            # sess.add_tensor_filter('debug', lambda d, t: 'xxx' in d.node_name)
+        # batch_out is not used for prediction, but needs to be fed in
+        batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
 
-            print('loading variables...')
-            saver.restore(sess, self._save_path)
-
-            # batch_out is not used for prediction, but needs to be fed in
-            batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
-
-            _predictions = sess.run(predictions, {
-                self.batch_in: signal,
-                self.batch_out: np.zeros(batch_out_size)
-            })
+        _predictions = self._session.run(predictions, {
+            self.batch_in: signal,
+            self.batch_out: np.zeros(batch_out_size)
+        })
 
         return np.array(_predictions)
 
-    def predict_boundaries(self, signal, reuse=True):
+    def predict_boundaries(self, signal):
         batch_size = signal.shape[1]
         truncate_len = signal.shape[0]
-        key = (batch_size, truncate_len)
-        if self._training_graph.get(key) is None:
-            self._training_graph[key] = self.network(self.output_module,
-                                                       batch_size,
-                                                       truncate_len, reuse)
 
-        _, _, indicators, _ = self._training_graph[key]
+        if self._session is None:
+            raise RuntimeError('Session unitialized; ' +
+                               'try loading variables or training network')
 
-        saver = tf.train.Saver()
-        with tf.Session() as sess:
-            # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            # sess.add_tensor_filter('debug', lambda d, t: 'xxx' in d.node_name)
+        if self._graph.get(batch_size) is None:
+            self._graph[batch_size] = self.network(batch_size, truncate_len)
 
-            print('loading variables...')
-            saver.restore(sess, self._save_path)
+        _, _, indicators, _ = self._graph[batch_size]
 
-            # batch_out is not used for prediction, but needs to be fed in
-            batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
+        # batch_out is not used for prediction, but needs to be fed in
+        batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
 
-            _indicators = sess.run(indicators, {
-                self.batch_in: signal,
-                self.batch_out: np.zeros(batch_out_size)
-            })
+        _indicators = self._session.run(indicators, {
+            self.batch_in: signal,
+            self.batch_out: np.zeros(batch_out_size)
+        })
 
         return np.array(_indicators).T

@@ -9,9 +9,8 @@ HMLSTMState = collections.namedtuple('HMLSTMCellState', ['c', 'h', 'z'])
 
 
 class HMLSTMCell(rnn_cell_impl.RNNCell):
-    def __init__(self, num_units, batch_size, h_below_size, h_above_size,
-                 reuse=None):
-        super(HMLSTMCell, self).__init__(_reuse=reuse)
+    def __init__(self, num_units, batch_size, h_below_size, h_above_size):
+        super(HMLSTMCell, self).__init__()
         self._num_units = num_units
         self._h_below_size = h_below_size
         self._h_above_size = h_above_size
@@ -39,26 +38,13 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         h = state.h
         z = state.z
 
-        # c=tf.identity(c, name='xxx_c')
-        # h=tf.identity(h, name='xxx_h')
-        # z=tf.identity(z, name='xxx_z')
-
         in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
-
-        # print([self._h_below_size, 1, self._h_above_size])
-        # print('between')
-        # print(inputs)
-        # print('end')
 
         hb, zb, ha = array_ops.split(
             value=inputs,
             num_or_size_splits=in_splits,
             axis=1,
             name='split')
-        
-        # hb=tf.identity(hb, name='xxx_hb')
-        # zb=tf.identity(zb, name='xxx_zb')
-        # ha=tf.identity(ha, name='xxx_ha')
 
         s_recurrent = h
 
@@ -87,10 +73,6 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = tf.expand_dims(self.calculate_new_indicator(z_tilde), -1)
-        
-        # new_c=tf.identity(new_c, name='xxx_new_c')
-        # new_h=tf.identity(new_h, name='xxx_new_h')
-        # new_z = tf.identity(new_z, name='xxx_new_z')
 
         output = array_ops.concat((new_h, new_z), axis=1)
         new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
@@ -169,7 +151,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
     def calculate_new_indicator(self, z_tilde):
         # use slope annealing trick
-        slope_multiplier = 1  # tf.maximum(tf.constant(.02) + self.epoch, tf.constant(5.))
+        slope_multiplier = 1  # NOTE: Change this for some tasks
         sigmoided = tf.sigmoid(z_tilde * slope_multiplier)
 
         # replace gradient calculation - use straight-through estimator
@@ -180,5 +162,4 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
                 new_z = tf.round(sigmoided, name=name)
 
         return tf.squeeze(new_z, axis=1)
-
 

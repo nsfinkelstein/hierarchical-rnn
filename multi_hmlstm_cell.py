@@ -9,8 +9,8 @@ import tensorflow as tf
 class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
     """HMLSTM cell composed squentially of individual HMLSTM cells."""
 
-    def __init__(self, cells, reuse=None):
-        super(MultiHMLSTMCell, self).__init__(_reuse=reuse)
+    def __init__(self, cells):
+        super(MultiHMLSTMCell, self).__init__()
         self._cells = cells
 
     def zero_state(self, batch_size, dtype):
@@ -37,8 +37,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         h_aboves = array_ops.split(value=raw_h_aboves,
                                    num_or_size_splits=ha_splits, axis=1)
 
-        z_below = tf.ones([tf.shape(inputs)[0], 1], name='zs_below')
-        raw_inp = array_ops.concat([raw_inp, z_below], axis=1, name='initial_raw_input')
+        z_below = tf.ones([tf.shape(inputs)[0], 1])
+        raw_inp = array_ops.concat([raw_inp, z_below], axis=1)
 
         new_states = [0] * len(self._cells)
         for i, cell in enumerate(self._cells):

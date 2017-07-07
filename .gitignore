@@ -97,3 +97,7 @@ ENV/
 
 # mypy
 .mypy_cache/
+run_regression.py
+hmlstm_demo.ipynb
+log/
+hmlstm_ckpt*

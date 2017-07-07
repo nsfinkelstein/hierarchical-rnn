@@ -36,7 +36,7 @@ class HMLSTMNetwork(object):
             self._output_size = output_size
             self._prediction_arg = 'logits'
         elif task == 'regression':
-            self._loss_function = tf.losses.mean_squared_error
+            self._loss_function = lambda predictions, labels: tf.square((predictions - labels))
             self._output_size = 1
             self._prediction_arg = 'predictions'
         else:
@@ -46,7 +46,7 @@ class HMLSTMNetwork(object):
         self.batch_in = tf.placeholder(
             tf.float32, shape=batch_shape, name='batch_in')
         self.batch_out = tf.placeholder(
-            tf.int32, shape=batch_shape, name='batch_out')
+            tf.float32, shape=batch_shape, name='batch_out')
 
         self._optimizer = tf.train.AdamOptimizer(1e-3)
         self._initialize_output_variables()
@@ -109,7 +109,7 @@ class HMLSTMNetwork(object):
 
         return embedding
 
-    def output_module(self, embedding, time_step):
+    def output_module(self, embedding, outcome):
         with vs.variable_scope('output_module_vars', reuse=True):
             b1 = vs.get_variable('b1')
             b2 = vs.get_variable('b2')
@@ -131,14 +131,13 @@ class HMLSTMNetwork(object):
 
             loss_args = {
                 self._prediction_arg: prediction,
-                'labels': self.batch_out[time_step, :, :],
+                'labels': outcome,
             }
 
             # print(dict( **loss_args ))
             # stop
             loss = self._loss_function(**loss_args)
-            scalar_loss = tf.reduce_mean(loss, name='loss_mean')
-        return scalar_loss, prediction
+        return loss, prediction
 
     def create_multicell(self, batch_size, reuse):
         def hmlstm_cell(layer):
@@ -193,7 +192,7 @@ class HMLSTMNetwork(object):
     def dynamic_network(self, output_module, batch_size, truncate_len, reuse):
         hmlstm = self.create_multicell(batch_size, reuse)
 
-        def scan_func(accum, elem):
+        def scan_rnn(accum, elem):
             # each element is the set of all hidden states from the previous
             # time step
             cell_states = self.split_out_cell_states(accum)
@@ -210,23 +209,32 @@ class HMLSTMNetwork(object):
         elem_len = (sum(self._hidden_state_sizes) * 2) + self._num_layers
         initial = tf.zeros([batch_size, elem_len])
 
-        result = tf.scan(scan_func, self.batch_in, initial)
+        states = tf.scan(scan_rnn, self.batch_in, initial)
+        timestep_states = tf.unstack(states, num=truncate_len, axis=0)
+        cell_states = [self.split_out_cell_states(s) for s in timestep_states]
+        indicators = [[l.z for l in layers] for layers in cell_states]
 
-        hidden_states = [self.split_out_cell_states(s)
-                         for s in tf.unstack(result, num=truncate_len, axis=0)]
+        to_map = tf.concat((states, self.batch_out), axis=2)
 
-        loss = tf.constant(0.0)
-        predictions = []
-        for i, hs in zip(range(truncate_len), hidden_states):
+        def map_output(elem):
+            splits = tf.constant([elem_len, self._output_size])
+            cell_states, outcome = array_ops.split(value=elem,
+                                                   num_or_size_splits=splits,
+                                                   axis=1)
 
-            gated = self.gate_input(array_ops.concat([s.h for s in hs], axis=1))
+            hs = [s.h for s in self.split_out_cell_states(cell_states)]
+            gated = self.gate_input(tf.concat(hs, axis=1))
             embeded = self.embed_input(gated)
-            new_loss, new_prediction = output_module(embeded, i)
-            loss += new_loss
+            loss, prediction = output_module(embeded, outcome)
+
+            return tf.concat((loss, prediction), axis=1)
+
+        mapped = tf.map_fn(map_output, to_map)
+
+        loss = tf.reduce_mean(mapped[:, :, 0])
+        predictions = mapped[:, :, 1:]
 
         train = self._optimizer.minimize(loss)
-        indicators = [[l.z for l in layers] for layers in hidden_states]
-
         return train, loss, indicators, predictions
 
     def network(self, *args, **kwargs):
@@ -293,8 +301,12 @@ class HMLSTMNetwork(object):
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
+            # batch_out is not used for prediction, but needs to be fed in
+            batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
+
             _predictions = sess.run(predictions, {
                 self.batch_in: signal,
+                self.batch_out: np.zeros(batch_out_size)
             })
 
         return np.array(_predictions)
@@ -318,8 +330,12 @@ class HMLSTMNetwork(object):
             print('loading variables...')
             saver.restore(sess, self._save_path)
 
+            # batch_out is not used for prediction, but needs to be fed in
+            batch_out_size = (signal.shape[0], signal.shape[1], self._output_size)
+
             _indicators = sess.run(indicators, {
                 self.batch_in: signal,
+                self.batch_out: np.zeros(batch_out_size)
             })
 
         return np.array(_indicators).T

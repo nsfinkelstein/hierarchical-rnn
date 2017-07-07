@@ -8,7 +8,7 @@ from string import ascii_lowercase
 
 # simulate multiresolution data
 num_signals = 20
-signal_length = 4
+signal_length = 500
 x = np.linspace(0, 40 * np.pi, signal_length)
 signals = [np.random.normal(0, 1, size=signal_length) 
            + (5 * np.sin(1 * x + np.random.random() * 100 * np.pi))
@@ -34,7 +34,7 @@ while start + batch_size < len(train):
 
     start += batch_size
     
-batch_size = 2
+batch_size = 3
 start = 0
 test_batches_in = []
 test_batches_out = []
@@ -54,10 +54,11 @@ test_batches_out = np.swapaxes(np.array( test_batches_out ), 1, 2)
 train_batches_in = np.swapaxes(np.array( train_batches_in ), 1, 2)
 train_batches_out = np.swapaxes(np.array( train_batches_out ), 1, 2)
 
-# network.train(train_batches_in, train_batches_out, epochs=3)
-# network.train(train_batches_in, train_batches_out, epochs=3, load_vars_from_disk=True)
-# writer = tf.summary.FileWriter('log/', graph=tf.get_default_graph())
+network.train(train_batches_in, train_batches_out, epochs=3)
+network.train(train_batches_in, train_batches_out, epochs=3, load_vars_from_disk=True)
+
+writer = tf.summary.FileWriter('log/', graph=tf.get_default_graph())
 
 boundaries = network.predict(test_batches_in[0])
-# boundaries = network.predict_boundaries(test_batches_in[0])
-# print(boundaries)
+boundaries = network.predict_boundaries(test_batches_in[0])
+print(boundaries)

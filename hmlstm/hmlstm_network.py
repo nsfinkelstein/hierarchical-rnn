@@ -14,7 +14,11 @@ class HMLSTMNetwork(object):
                  hidden_state_sizes=50,
                  out_hidden_size=100,
                  embed_size=100,
-                 task='classification'):
+                 task='regression'):
+        """
+        params
+
+        """
 
         self._out_hidden_size = out_hidden_size
         self._embed_size = embed_size

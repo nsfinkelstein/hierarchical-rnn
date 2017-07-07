@@ -1,7 +1,7 @@
 # hmlstm
 
 This package implements the Hierarchical Multiscale LSTM network described by
-Chung et. al in https://arxiv.org/abs/1609.01704
+Chung et al. in https://arxiv.org/abs/1609.01704
 
 ### Installation
 

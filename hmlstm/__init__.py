@@ -1,1 +1,1 @@
-from hmlstm_network import HMLSTMNetwork
+from .hmlstm_network import HMLSTMNetwork

@@ -1,8 +1,6 @@
-from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import variable_scope as vs
-from hmlstm_cell import HMLSTMState
 import tensorflow as tf
 
 

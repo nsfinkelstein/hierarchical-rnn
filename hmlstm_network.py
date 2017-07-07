@@ -274,8 +274,8 @@ class HMLSTMNetwork(object):
             saver.save(sess, self._save_path)
 
     def predict(self, signal, reuse=True):
-        batch_size = 1
-        truncate_len = len(signal)
+        batch_size = signal.shape[1]
+        truncate_len = signal.shape[0]
         key = (batch_size, truncate_len)
         if self._training_graph.get(key) is None:
             self._training_graph[key] = self.network(self.output_module,
@@ -294,14 +294,14 @@ class HMLSTMNetwork(object):
             saver.restore(sess, self._save_path)
 
             _predictions = sess.run(predictions, {
-                self.batch_in: [signal],
+                self.batch_in: signal,
             })
 
         return np.array(_predictions)
 
     def predict_boundaries(self, signal, reuse=True):
-        batch_size = 1
-        truncate_len = len(signal)
+        batch_size = signal.shape[1]
+        truncate_len = signal.shape[0]
         key = (batch_size, truncate_len)
         if self._training_graph.get(key) is None:
             self._training_graph[key] = self.network(self.output_module,
@@ -319,7 +319,7 @@ class HMLSTMNetwork(object):
             saver.restore(sess, self._save_path)
 
             _indicators = sess.run(indicators, {
-                self.batch_in: [signal],
+                self.batch_in: signal,
             })
 
         return np.array(_indicators).T

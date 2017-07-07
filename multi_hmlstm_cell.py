@@ -30,15 +30,15 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         total_hidden_size = sum(c._h_above_size for c in self._cells)
 
         # split out the part of the input that stores values of ha
-        raw_inp = inputs[:, :, :-total_hidden_size]
-        raw_h_aboves = inputs[:, :, -total_hidden_size:]
+        raw_inp = inputs[:, :-total_hidden_size]
+        raw_h_aboves = inputs[:, -total_hidden_size:]
 
         ha_splits = [c._h_above_size for c in self._cells]
         h_aboves = array_ops.split(value=raw_h_aboves,
-                                   num_or_size_splits=ha_splits, axis=2)
+                                   num_or_size_splits=ha_splits, axis=1)
 
-        z_below = tf.ones([tf.shape(inputs)[0], 1, 1], name='zs_below')
-        raw_inp = array_ops.concat([raw_inp, z_below], axis=2, name='initial_raw_input')
+        z_below = tf.ones([tf.shape(inputs)[0], 1], name='zs_below')
+        raw_inp = array_ops.concat([raw_inp, z_below], axis=1, name='initial_raw_input')
 
         new_states = [0] * len(self._cells)
         for i, cell in enumerate(self._cells):
@@ -46,7 +46,7 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
                 cur_state = state[i]
 
                 cur_inp = array_ops.concat(
-                    [raw_inp, h_aboves[i]], axis=2, name='input_to_cell')
+                    [raw_inp, h_aboves[i]], axis=1, name='input_to_cell')
 
                 raw_inp, new_state = cell(cur_inp, cur_state)
                 raw_inp = raw_inp

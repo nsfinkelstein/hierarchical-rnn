@@ -44,6 +44,9 @@ network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True,
 
 predictions = network.predict(batches_in[-1], variable_path='./text8')
 boundaries = network.predict_boundaries(batches_in[-1], variable_path='./text8')
+
+# visualize boundaries
+viz_char_boundaries(get_text(batches_out[-1][0]), get_text(predictions[0]), boundaries[0])
 ```
 
 ### Time series prediction

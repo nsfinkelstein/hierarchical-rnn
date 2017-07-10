@@ -18,8 +18,6 @@ def load_text(text_path, truncate_len, step_size, batch_size, num_chars):
         text = text.replace('\n', ' ')
         text = re.sub(' +', ' ', text).lower()
 
-    # text = 'abcdefghijklmnopqrstuvwxyz' * 100000000
-
     signals = []
     start = 0
     while start + truncate_len < len(text):
@@ -72,7 +70,8 @@ def prepare_inputs(batch_size=10,
         y = text(text_path, truncate_len, step_size, batch_size)
         num_batches = len(y) // batch_size
     elif num_batches is not None:
-        # NOTE: This is an over estimate
+        if step_size > truncate_len:
+            raise ValueError('Step size cannot be greater than truncate length')
         num_chars = batch_size * num_batches * truncate_len
         y = text(text_path, truncate_len, step_size, batch_size, num_chars)
 

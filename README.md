@@ -14,6 +14,14 @@ corresponding to that layer of the network.
 pip install git+https://github.com/n-s-f/hierarchical-rnn.git
 ```
 
+Or, if you're interested in changing the code:
+
+```
+git clone https://github.com/n-s-f/hierarchical-rnn.git
+cd hierarchical
+python setup.py develop
+```
+
 ### Character Classification
 
 In this example, we'll consider the 
@@ -27,20 +35,54 @@ from hmlstm import HMLSTMNetwork, prepare_inputs, get_text
 batches_in, batches_out = prepare_inputs(batch_size=10, truncate_len=5000, 
                                          step_size=2500, text_path='text8.txt')
                                          
-network = HMLSTMNetwork(input_size=)
+network = HMLSTMNetwork(output_size=27, input_size=27, embed_size=2048, 
+                        out_hidden_size=1024, hidden_state_sizes=1024, 
+                        task='classification')
 
-network.train(in_batches[:-1], out_batches[:-1])
+network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True, 
+              load_vars_to_disk=False, variable_path='./text8')
 
-predictions = network.predict(in_batches[-1])
-boundaries = network.predict_boundaries(in_batches[-1])
+predictions = network.predict(batches_in[-1], variable_path='./text8')
+boundaries = network.predict_boundaries(batches_in[-1], variable_path='./text8')
 ```
 
 ### Time series prediction
 
-___
+In this example, we'll do three-step-ahead prediction on a noisy set of signals
+with sinusoidal activity at two scales.
+
+```.py
+from hmlstm import HMLSTMNetwork, convert_to_batches, plot_indicators
+
+network = HMLSTMNetwork(input_size=1, task='regression', hidden_state_sizes=30,
+                       embed_size=50, out_hidden_size=30, num_layers=2)
+                       
+# generate signals
+num_signals = 300
+signal_length = 400
+x = np.linspace(0, 50 * np.pi, signal_length)
+signals = [np.random.normal(0, .5, size=signal_length) +
+           (2 * np.sin(.6 * x + np.random.random() * 10)) +
+           (5 * np.sin(.1* x + np.random.random() * 10))
+    for _ in range(num_signals)] 
+    
+batches_in, batches_out = convert_to_batches(signals, batch_size=10)
+
+
+network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True, 
+              load_vars_to_disk=False, variable_path='./sinusoidal')
+
+predictions = network.predict(batches_in[-1], variable_path='./sinusoidal')
+boundaries = network.predict_boundaries(batches_in[-1], variable_path='./sinusoidal')
+
+# visualize boundaries
+plot_indicators(batches_out[-1][0], predictions[0], indicators=boundaries[0])
+```
+
+### Further guidance
 
 Please see the doc strings in the code for more detailed documentation, and the
 [demo notebook](https://github.com/n-s-f/hierarchical-rnn/blob/master/hmlstm_demo.ipynb)
 for more thorough examples.
 
-
+Pull requests or open github issues for improvements are very welcome.

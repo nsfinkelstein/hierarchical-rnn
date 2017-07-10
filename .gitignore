@@ -99,5 +99,3 @@ ENV/
 .mypy_cache/
 run_regression.py
 log/
-hmlstm_ckpt*
-text*

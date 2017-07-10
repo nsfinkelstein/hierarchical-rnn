@@ -14,16 +14,30 @@ corresponding to that layer of the network.
 pip install git+https://github.com/n-s-f/hierarchical-rnn.git
 ```
 
-### Usage
+### Character Classification
+
+In this example, we'll consider the 
+[text8](https://cs.fit.edu/~mmahoney/compression/textdata.html) data set, which
+contains only lower case english characters, and spaces. We'll train on all
+batches but the last, and test on just the last batch.
 
 ```.py
-from hmlstm import HMLSTMNetwork
+from hmlstm import HMLSTMNetwork, prepare_inputs, get_text
 
-network = HMLSTMNetwork()
+batches_in, batches_out = prepare_inputs(batch_size=10, truncate_len=5000, 
+                                         step_size=2500, text_path='text8.txt')
+                                         
+network = HMLSTMNetwork(input_size=)
 
-network.train(in_batches, out_batches)
-network.predict(prediction_batch)
+network.train(in_batches[:-1], out_batches[:-1])
+
+predictions = network.predict(in_batches[-1])
+boundaries = network.predict_boundaries(in_batches[-1])
 ```
+
+### Time series prediction
+
+___
 
 Please see the doc strings in the code for more detailed documentation, and the
 [demo notebook](https://github.com/n-s-f/hierarchical-rnn/blob/master/hmlstm_demo.ipynb)

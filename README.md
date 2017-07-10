@@ -66,7 +66,7 @@ signals = [np.random.normal(0, .5, size=signal_length) +
            (5 * np.sin(.1* x + np.random.random() * 10))
     for _ in range(num_signals)] 
     
-batches_in, batches_out = convert_to_batches(signals, batch_size=10)
+batches_in, batches_out = convert_to_batches(signals, batch_size=10, steps_ahead=3)
 
 
 network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True, 

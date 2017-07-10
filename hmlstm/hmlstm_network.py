@@ -338,6 +338,7 @@ class HMLSTMNetwork(object):
         predictions for the batch
         """
 
+        batch = np.array(batch)
         batch_size = batch.shape[0]
         _, _, _, predictions = self._get_graph(batch_size)
 
@@ -371,6 +372,7 @@ class HMLSTMNetwork(object):
         indicator values for ever layer at every timestep
         """
 
+        batch = np.array(batch)
         batch_size = batch.shape[0]
         _, _, indicators, _ = self._get_graph(batch_size)
 

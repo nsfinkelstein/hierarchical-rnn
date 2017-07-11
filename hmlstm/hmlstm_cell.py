@@ -28,9 +28,9 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return self._num_units + 1
 
     def zero_state(self, batch_size, dtype):
-        c = tf.zeros([batch_size, self._num_units], name='first_c_xxx')
-        h = tf.zeros([batch_size, self._num_units], name='first_h_xxx')
-        z = tf.zeros([batch_size], name='first_z_xxx')
+        c = tf.zeros([batch_size, self._num_units])
+        h = tf.zeros([batch_size, self._num_units])
+        z = tf.zeros([batch_size])
         return HMLSTMState(c=c, h=h, z=z)
 
     def call(self, inputs, state):

@@ -286,9 +286,9 @@ class HMLSTMNetwork(object):
 
         mapped = tf.map_fn(map_output, to_map)                  # [T, B, _]
 
-        # loss has diffenent shape for task 'regression' and 'loss'
+        # mapped has diffenent shape for task 'regression' and 'classification'
         loss = tf.reduce_mean(mapped[:, :, :-self._output_size])  # scalar
-        predictions = mapped[:, :, -self.output_size:]
+        predictions = mapped[:, :, -self._output_size:]
         train = self._optimizer.minimize(loss)
 
         return train, loss, indicators, predictions

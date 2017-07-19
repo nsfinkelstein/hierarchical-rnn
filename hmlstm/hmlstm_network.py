@@ -59,11 +59,12 @@ class HMLSTMNetwork(object):
         elif task == 'regression':
             self._loss_function = lambda logits, labels: tf.square((logits - labels))
 
-        batch_shape = (None, None, self._output_size)
+        batch_in_shape = (None, None, self._input_size)
+        batch_out_shape = (None, None, self._output_size)
         self.batch_in = tf.placeholder(
-            tf.float32, shape=batch_shape, name='batch_in')
+            tf.float32, shape=batch_in_shape, name='batch_in')
         self.batch_out = tf.placeholder(
-            tf.float32, shape=batch_shape, name='batch_out')
+            tf.float32, shape=batch_out_shape, name='batch_out')
 
         self._optimizer = tf.train.AdamOptimizer(1e-3)
         self._initialize_output_variables()

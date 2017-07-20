@@ -34,10 +34,16 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return HMLSTMState(c=c, h=h, z=z)
 
     def call(self, inputs, state):
-        """Hierarchical multi-scale long short-term memory cell (HMLSTM)"""
-        c = state.c
-        h = state.h
-        z = state.z
+        """
+        Hierarchical multi-scale long short-term memory cell (HMLSTM)
+
+        inputs: [B, hb_l + 1 + ha_l]
+        state: (c=[B, h_l], h=[B, h_l], z=[B, 1])
+
+        """
+        c = state.c                 # [B, h_l]
+        h = state.h                 # [B, h_l]
+        z = state.z                 # [B, 1]
 
         in_splits = tf.constant([self._h_below_size, 1, self._h_above_size])
 
@@ -45,18 +51,19 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
             value=inputs,
             num_or_size_splits=in_splits,
             axis=1,
-            name='split')
+            name='split')           # [B, hb_l], [B, 1], [B, ha_l]
 
-        s_recurrent = h
+        s_recurrent = h             # [B, h_l]
 
-        expanded_z = z
-        s_above = tf.multiply(expanded_z, ha)
-        s_below = tf.multiply(zb, hb)
+        expanded_z = z              # [B, 1]
+        s_above = tf.multiply(expanded_z, ha)   # [B, ha_l]
+        s_below = tf.multiply(zb, hb)           # [B, hb_l]
 
         length = 4 * self._num_units + 1
         states = [s_recurrent, s_above, s_below]
 
         bias_init = tf.constant_initializer(-1e5, dtype=tf.float32)
+        # [B, 4 * h_l + 1]
         concat = rnn_cell_impl._linear(states, length, bias=False,
                                        bias_initializer=bias_init)
 
@@ -66,10 +73,10 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         i, g, f, o, z_tilde = array_ops.split(
             value=concat, num_or_size_splits=gate_splits, axis=1)
 
-        i = tf.sigmoid(i)
-        g = tf.tanh(g)
-        f = tf.sigmoid(f)
-        o = tf.sigmoid(o)
+        i = tf.sigmoid(i)           # [B, h_l]
+        g = tf.tanh(g)              # [B, h_l]
+        f = tf.sigmoid(f)           # [B, h_l]
+        o = tf.sigmoid(o)           # [B, h_l]
 
         new_c = self.calculate_new_cell_state(c, g, i, f, z, zb)
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
@@ -81,8 +88,14 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         return output, new_state
 
     def calculate_new_cell_state(self, c, g, i, f, z, zb):
-        # update c and h according to correct operations
-        # must do each batch independently
+        '''
+        update c and h according to correct operations
+        must do each batch independently
+
+        c, g, i, f: [B, h_l]
+        z, zb: [B, 1]
+
+        '''
         new_c = [0] * self._batch_size
         for b in range(self._batch_size):
 

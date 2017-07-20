@@ -212,7 +212,7 @@ class HMLSTMNetwork(object):
         '''
         accum: [B, sum(h_l)]
 
-        cell_states: a list
+        cell_states: a list of ([B, h_l], [B, h_l], [B, 1]), with length L
         '''
         splits = []
         for size in self._hidden_state_sizes:
@@ -231,6 +231,11 @@ class HMLSTMNetwork(object):
         return cell_states
 
     def get_h_aboves(self, hidden_states, batch_size, hmlstm):
+        '''
+        hidden_states: [[B, h_l] for l in range(L)]
+
+        h_aboves: [B, sum(ha_l)], ha denotes h_above
+        '''
         concated_hs = array_ops.concat(hidden_states[1:], axis=1)
 
         h_above_for_last_layer = tf.zeros(
@@ -250,16 +255,16 @@ class HMLSTMNetwork(object):
             cell_states = self.split_out_cell_states(accum)
 
             h_aboves = self.get_h_aboves([cs.h for cs in cell_states],
-                                         batch_size, hmlstm)
-
+                                         batch_size, hmlstm)    # [B, sum(ha_l)]
+            # [B, I] + [B, sum(ha_l)] -> [B, I + sum(ha_l)]
             hmlstm_in = array_ops.concat((elem, h_aboves), axis=1)
             _, state = hmlstm(hmlstm_in, cell_states)
 
             concated_states = [array_ops.concat(tuple(s), axis=1) for s in state]
             return array_ops.concat(concated_states, axis=1)
-
+        # denote 'elem_len' as 'H'
         elem_len = (sum(self._hidden_state_sizes) * 2) + self._num_layers
-        initial = tf.zeros([batch_size, elem_len])
+        initial = tf.zeros([batch_size, elem_len])              # [B, H]
 
         states = tf.scan(scan_rnn, self.batch_in, initial)      # [T, B, H]
 
@@ -306,7 +311,7 @@ class HMLSTMNetwork(object):
         params:
         ---
         batches_in: a 4 dimensional numpy array. The dimensions should be
-            [num_batches, num_timesteps, batch_size, input_size]
+            [num_batches, batch_size, num_timesteps, input_size]
             These represent the input at each time step for each batch.
         batches_out: a 4 dimensional numpy array. The dimensions should be
             [num_batches, batch_size, num_timesteps, output_size]

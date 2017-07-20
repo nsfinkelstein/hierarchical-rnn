@@ -259,9 +259,10 @@ class HMLSTMNetwork(object):
             # [B, I] + [B, sum(ha_l)] -> [B, I + sum(ha_l)]
             hmlstm_in = array_ops.concat((elem, h_aboves), axis=1)
             _, state = hmlstm(hmlstm_in, cell_states)
-
+            # a list of (c=[B, h_l], h=[B, h_l], z=[B, 1]) ->
+            # a list of [B, h_l + h_l + 1]
             concated_states = [array_ops.concat(tuple(s), axis=1) for s in state]
-            return array_ops.concat(concated_states, axis=1)
+            return array_ops.concat(concated_states, axis=1)    # [B, H]
         # denote 'elem_len' as 'H'
         elem_len = (sum(self._hidden_state_sizes) * 2) + self._num_layers
         initial = tf.zeros([batch_size, elem_len])              # [B, H]

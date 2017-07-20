@@ -40,6 +40,8 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         inputs: [B, hb_l + 1 + ha_l]
         state: (c=[B, h_l], h=[B, h_l], z=[B, 1])
 
+        output: [B, h_l + 1]
+        new_state: (c=[B, h_l], h=[B, h_l], z=[B, 1])
         """
         c = state.c                 # [B, h_l]
         h = state.h                 # [B, h_l]
@@ -82,7 +84,7 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         new_h = self.calculate_new_hidden_state(h, o, new_c, z, zb)
         new_z = tf.expand_dims(self.calculate_new_indicator(z_tilde), -1)
 
-        output = array_ops.concat((new_h, new_z), axis=1)
+        output = array_ops.concat((new_h, new_z), axis=1)   # [B, h_l + 1]
         new_state = HMLSTMState(c=new_c, h=new_h, z=new_z)
 
         return output, new_state
@@ -95,73 +97,39 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
         c, g, i, f: [B, h_l]
         z, zb: [B, 1]
 
+        new_c: [B, h_l]
         '''
-        new_c = [0] * self._batch_size
-        for b in range(self._batch_size):
-
-            def copy_c():
-                return tf.identity(c[b])
-
-            def update_c():
-                return tf.add(tf.multiply(f[b], c[b]), tf.multiply(i[b], g[b]))
-
-            def flush_c():
-                return tf.multiply(i[b], g[b], name='c')
-
-            def default_c():
-                return tf.zeros_like(flush_c())
-
-            new_c[b] = tf.case(
-                {
-                    tf.equal(
-                        tf.squeeze(z[b]), tf.constant(1., dtype=tf.float32),
-                        name='flush_c_xxx'
-                    ): flush_c,
-                    tf.logical_and(
-                        tf.equal(
-                            tf.squeeze(z[b], name='squeeze_z_xxx'),
-                            tf.constant(0., dtype=tf.float32)),
-                        tf.equal(
-                            tf.squeeze(zb[b], name='squeeze_zb_xxx'),
-                            tf.constant(0., dtype=tf.float32)),
-                        name='copy_c_xxx'
-                    ): copy_c,
-                    tf.logical_and(
-                        tf.equal(
-                            tf.squeeze(z[b]),
-                            tf.constant(0., dtype=tf.float32)),
-                        tf.equal(
-                            tf.squeeze(zb[b]),
-                            tf.constant(1., dtype=tf.float32)),
-                        name='update_c_xxx'
-                    ): update_c,
-                },
-                default=default_c,
-                exclusive=True)
-
-        return tf.stack(new_c, axis=0)
+        z = tf.squeeze(z, axis=[1])                                 # [B]
+        zb = tf.squeeze(zb, axis=[1])                               # [B]
+        new_c = tf.where(
+            tf.equal(z, tf.constant(1., dtype=tf.float32)),         # [B]
+            tf.multiply(i, g, name='c'),                            # [B, h_l]
+            tf.where(
+                tf.equal(zb, tf.constant(0., dtype=tf.float32)),    # [B]
+                tf.identity(c),                                     # [B, h_l]
+                tf.add(tf.multiply(f, c), tf.multiply(i, g))        # [B, h_l]
+            )
+        )
+        return new_c  # [B, h_l]
 
     def calculate_new_hidden_state(self, h, o, new_c, z, zb):
-        new_h = [0] * self._batch_size
-        for b in range(self._batch_size):
+        '''
+        h, o, new_c: [B, h_l]
+        z, zb: [B, 1]
 
-            def copy_h():
-                return tf.identity(h[b])
-
-            def update_h():
-                return tf.multiply(o[b], tf.tanh(new_c[b]))
-
-            new_h[b] = tf.cond(
-                tf.logical_and(
-                    tf.equal(
-                        tf.squeeze(z[b]),
-                        tf.constant(0., dtype=tf.float32)),
-                    tf.equal(
-                        tf.squeeze(zb[b]),
-                        tf.constant(0., dtype=tf.float32))),
-                copy_h, update_h)
-
-        return tf.stack(new_h, axis=0)
+        new_h: [B, h_l]
+        '''
+        z = tf.squeeze(z, axis=[1])             # [B]
+        zb = tf.squeeze(zb, axis=[1])           # [B]
+        new_h = tf.where(
+            tf.logical_and(
+                tf.equal(z, tf.constant(0., dtype=tf.float32)),
+                tf.equal(zb, tf.constant(0., dtype=tf.float32))
+            ),                                  # [B]
+            tf.identity(h),                     # [B, h_l], if copy
+            tf.multiply(o, tf.tanh(new_c))      # [B, h_l], otherwise
+        )
+        return new_h                            # [B, h_l]
 
     def calculate_new_indicator(self, z_tilde):
         # use slope annealing trick

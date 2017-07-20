@@ -27,7 +27,8 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         inputs: [B, I + sum(ha_l)]
         state: a list of ([B, h_l], [B, h_l], [B, 1]), with length L
 
-
+        hidden_states: a list of [B, h_l], length L
+        new_states: a list of (c=[B, h_l], h=[B, h_l], z=[B, 1]), length L
         """
 
         total_hidden_size = sum(c._h_above_size for c in self._cells)
@@ -47,12 +48,12 @@ class MultiHMLSTMCell(rnn_cell_impl.RNNCell):
         for i, cell in enumerate(self._cells):
             with vs.variable_scope("cell_%d" % i):
                 cur_state = state[i]    # ([B, h_l], [B, h_l], [B, 1])
-                # [B, I + 1] + [B, ha_l] -> [B, I + 1 + ha_l]
+                # i == 0: [B, I + 1] + [B, ha_l] -> [B, I + 1 + ha_l]
+                # i != 0: [B, ha_l + 1] + [B, ha_l] -> [B, ha_l + 1 + ha_l]
                 cur_inp = array_ops.concat(
                     [raw_inp, h_aboves[i]], axis=1, name='input_to_cell')
 
                 raw_inp, new_state = cell(cur_inp, cur_state)
-                raw_inp = raw_inp
                 new_states[i] = new_state
 
         hidden_states = [ns.h for ns in new_states]

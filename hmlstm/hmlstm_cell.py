@@ -99,15 +99,15 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
 
         new_c: [B, h_l]
         '''
-        z = tf.squeeze(z, axis=[1])                                 # [B]
-        zb = tf.squeeze(zb, axis=[1])                               # [B]
+        z = tf.squeeze(z, axis=[1])                           # [B]
+        zb = tf.squeeze(zb, axis=[1])                         # [B]
         new_c = tf.where(
-            tf.equal(z, tf.constant(1., dtype=tf.float32)),         # [B]
-            tf.multiply(i, g, name='c'),                            # [B, h_l]
+            tf.equal(z, tf.constant(1., dtype=tf.float32)),   # [B]
+            tf.multiply(i, g, name='c'),                      # [B, h_l], flush
             tf.where(
                 tf.equal(zb, tf.constant(0., dtype=tf.float32)),    # [B]
-                tf.identity(c),                                     # [B, h_l]
-                tf.add(tf.multiply(f, c), tf.multiply(i, g))        # [B, h_l]
+                tf.identity(c),                               # [B, h_l], copy
+                tf.add(tf.multiply(f, c), tf.multiply(i, g))  # [B, h_l], update
             )
         )
         return new_c  # [B, h_l]

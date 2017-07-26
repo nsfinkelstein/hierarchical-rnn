@@ -210,7 +210,8 @@ class HMLSTMNetwork(object):
 
     def split_out_cell_states(self, accum):
         '''
-        accum: [B, sum(h_l)]
+        accum: [B, H], i.e. [B, sum(h_l) * 2 + num_layers]
+
 
         cell_states: a list of ([B, h_l], [B, h_l], [B, 1]), with length L
         '''

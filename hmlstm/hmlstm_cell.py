@@ -92,7 +92,6 @@ class HMLSTMCell(rnn_cell_impl.RNNCell):
     def calculate_new_cell_state(self, c, g, i, f, z, zb):
         '''
         update c and h according to correct operations
-        must do each batch independently
 
         c, g, i, f: [B, h_l]
         z, zb: [B, 1]

@@ -112,9 +112,14 @@ class HMLSTMNetwork(object):
         saver.save(self._session, path)
 
     def gate_input(self, hidden_states):
-        # gate the incoming hidden states
+        '''
+        gate the incoming hidden states
+        hidden_states: [B, sum(h_l)]
+
+        gated_input: [B, sum(h_l)]
+        '''
         with vs.variable_scope('gates_vars', reuse=True):
-            gates = []
+            gates = []  # [[B, 1] for l in range(L)]
             for l in range(self._num_layers):
                 weights = vs.get_variable('gate_%d' % l, dtype=tf.float32)
                 gates.append(tf.sigmoid(tf.matmul(hidden_states, weights)))
@@ -124,14 +129,19 @@ class HMLSTMNetwork(object):
                 num_or_size_splits=self._hidden_state_sizes,
                 axis=1)
 
-            gated_list = []
+            gated_list = []  # [[B, h_l] for l in range(L)]
             for gate, hidden_state in zip(gates, split):
                 gated_list.append(tf.multiply(gate, hidden_state))
 
-            gated_input = tf.concat(gated_list, axis=1)
+            gated_input = tf.concat(gated_list, axis=1)  # [B, sum(h_l)]
         return gated_input
 
     def embed_input(self, gated_input):
+        '''
+        gated_input: [B, sum(h_l)]
+
+        embedding: [B, E], i.e. [B, embed_size]
+        '''
         with vs.variable_scope('embedding_vars', reuse=True):
             embed_weights = vs.get_variable('embed_weights', dtype=tf.float32)
 
@@ -141,6 +151,13 @@ class HMLSTMNetwork(object):
         return embedding
 
     def output_module(self, embedding, outcome):
+        '''
+        embedding: [B, E]
+        outcome: [B, output_size]
+
+        loss: [B, output_size] or [B, 1]
+        prediction: [B, output_size]
+        '''
         with vs.variable_scope('output_module_vars', reuse=True):
             b1 = vs.get_variable('b1')
             b2 = vs.get_variable('b2')
@@ -192,6 +209,12 @@ class HMLSTMNetwork(object):
         return hmlstm
 
     def split_out_cell_states(self, accum):
+        '''
+        accum: [B, H], i.e. [B, sum(h_l) * 2 + num_layers]
+
+
+        cell_states: a list of ([B, h_l], [B, h_l], [B, 1]), with length L
+        '''
         splits = []
         for size in self._hidden_state_sizes:
             splits += [size, size, 1]
@@ -209,6 +232,11 @@ class HMLSTMNetwork(object):
         return cell_states
 
     def get_h_aboves(self, hidden_states, batch_size, hmlstm):
+        '''
+        hidden_states: [[B, h_l] for l in range(L)]
+
+        h_aboves: [B, sum(ha_l)], ha denotes h_above
+        '''
         concated_hs = array_ops.concat(hidden_states[1:], axis=1)
 
         h_above_for_last_layer = tf.zeros(
@@ -228,26 +256,27 @@ class HMLSTMNetwork(object):
             cell_states = self.split_out_cell_states(accum)
 
             h_aboves = self.get_h_aboves([cs.h for cs in cell_states],
-                                         batch_size, hmlstm)
-
+                                         batch_size, hmlstm)    # [B, sum(ha_l)]
+            # [B, I] + [B, sum(ha_l)] -> [B, I + sum(ha_l)]
             hmlstm_in = array_ops.concat((elem, h_aboves), axis=1)
             _, state = hmlstm(hmlstm_in, cell_states)
-
+            # a list of (c=[B, h_l], h=[B, h_l], z=[B, 1]) ->
+            # a list of [B, h_l + h_l + 1]
             concated_states = [array_ops.concat(tuple(s), axis=1) for s in state]
-            return array_ops.concat(concated_states, axis=1)
-
+            return array_ops.concat(concated_states, axis=1)    # [B, H]
+        # denote 'elem_len' as 'H'
         elem_len = (sum(self._hidden_state_sizes) * 2) + self._num_layers
-        initial = tf.zeros([batch_size, elem_len])
+        initial = tf.zeros([batch_size, elem_len])              # [B, H]
 
-        states = tf.scan(scan_rnn, self.batch_in, initial)
+        states = tf.scan(scan_rnn, self.batch_in, initial)      # [T, B, H]
 
         def map_indicators(elem):
             state = self.split_out_cell_states(elem)
             return tf.concat([l.z for l in state], axis=1)
 
-        raw_indicators = tf.map_fn(map_indicators, states)
-        indicators = tf.transpose(raw_indicators, [1, 2, 0])
-        to_map = tf.concat((states, self.batch_out), axis=2)
+        raw_indicators = tf.map_fn(map_indicators, states)      # [T, B, L]
+        indicators = tf.transpose(raw_indicators, [1, 2, 0])    # [B, L, T]
+        to_map = tf.concat((states, self.batch_out), axis=2)    # [T, B, H + O]
 
         def map_output(elem):
             splits = tf.constant([elem_len, self._output_size])
@@ -256,16 +285,16 @@ class HMLSTMNetwork(object):
                                                    axis=1)
 
             hs = [s.h for s in self.split_out_cell_states(cell_states)]
-            gated = self.gate_input(tf.concat(hs, axis=1))
-            embeded = self.embed_input(gated)
+            gated = self.gate_input(tf.concat(hs, axis=1))      # [B, sum(h_l)]
+            embeded = self.embed_input(gated)                   # [B, E]
             loss, prediction = self.output_module(embeded, outcome)
-
+            # [B, output_size * 2] or [B, 1 + output_size]
             return tf.concat((loss, prediction), axis=1)
 
-        mapped = tf.map_fn(map_output, to_map)
+        mapped = tf.map_fn(map_output, to_map)                  # [T, B, _]
 
         # mapped has diffenent shape for task 'regression' and 'classification'
-        loss = tf.reduce_mean(mapped[:, :, :-self._output_size])
+        loss = tf.reduce_mean(mapped[:, :, :-self._output_size])  # scalar
         predictions = mapped[:, :, -self._output_size:]
         train = self._optimizer.minimize(loss)
 
@@ -284,7 +313,7 @@ class HMLSTMNetwork(object):
         params:
         ---
         batches_in: a 4 dimensional numpy array. The dimensions should be
-            [num_batches, num_timesteps, batch_size, input_size]
+            [num_batches, batch_size, num_timesteps, input_size]
             These represent the input at each time step for each batch.
         batches_out: a 4 dimensional numpy array. The dimensions should be
             [num_batches, batch_size, num_timesteps, output_size]

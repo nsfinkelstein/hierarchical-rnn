@@ -40,7 +40,7 @@ network = HMLSTMNetwork(output_size=27, input_size=27, embed_size=2048,
                         task='classification')
 
 network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True, 
-              load_vars_to_disk=False, variable_path='./text8')
+              load_vars_from_disk=False, variable_path='./text8')
 
 predictions = network.predict(batches_in[-1], variable_path='./text8')
 boundaries = network.predict_boundaries(batches_in[-1], variable_path='./text8')
@@ -73,7 +73,7 @@ batches_in, batches_out = convert_to_batches(signals, batch_size=10, steps_ahead
 
 
 network.train(batches_in[:-1], batches_out[:-1], save_vars_to_disk=True, 
-              load_vars_to_disk=False, variable_path='./sinusoidal')
+              load_vars_from_disk=False, variable_path='./sinusoidal')
 
 predictions = network.predict(batches_in[-1], variable_path='./sinusoidal')
 boundaries = network.predict_boundaries(batches_in[-1], variable_path='./sinusoidal')

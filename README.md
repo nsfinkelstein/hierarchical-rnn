@@ -82,7 +82,7 @@ boundaries = network.predict_boundaries(batches_in[-1], variable_path='./sinusoi
 plot_indicators(batches_out[-1][0], predictions[0], indicators=boundaries[0])
 ```
 
-### Further guidance
+### Further information
 
 Please see the doc strings in the code for more detailed documentation, and the
 [demo notebook](https://github.com/n-s-f/hierarchical-rnn/blob/master/hmlstm_demo.ipynb)

@@ -247,7 +247,8 @@ class HMLSTMNetwork(object):
 
         return h_aboves
 
-    def network(self, batch_size, reuse):
+    def network(self, reuse):
+        batch_size = tf.shape(self.batch_in)[0]
         hmlstm = self.create_multicell(batch_size, reuse)
 
         def scan_rnn(accum, elem):
@@ -325,8 +326,7 @@ class HMLSTMNetwork(object):
         epochs: integer, number of epochs
         """
 
-        batch_size = len(batches_in[0])
-        optim, loss, _, _ = self._get_graph(batch_size)
+        optim, loss, _, _ = self._get_graph()
 
         if not load_vars_from_disk:
             if self._session is None:
@@ -370,8 +370,7 @@ class HMLSTMNetwork(object):
         """
 
         batch = np.array(batch)
-        batch_size = batch.shape[0]
-        _, _, _, predictions = self._get_graph(batch_size)
+        _, _, _, predictions = self._get_graph()
 
         self._load_vars(variable_path)
 
@@ -404,8 +403,7 @@ class HMLSTMNetwork(object):
         """
 
         batch = np.array(batch)
-        batch_size = batch.shape[0]
-        _, _, indicators, _ = self._get_graph(batch_size)
+        _, _, indicators, _ = self._get_graph()
 
         self._load_vars(variable_path)
 
@@ -418,11 +416,10 @@ class HMLSTMNetwork(object):
 
         return np.array(_indicators)
 
-    def _get_graph(self, batch_size):
-        if self._graph.get(batch_size) is None:
-            reuse = len(self._graph) != 0
-            self._graph[batch_size] = self.network(batch_size, reuse)
-        return self._graph[batch_size]
+    def _get_graph(self):
+        if self._graph is None:
+            self._graph = self.network(reuse=True)
+        return self._graph
 
     def _load_vars(self, variable_path):
         if self._session is None:

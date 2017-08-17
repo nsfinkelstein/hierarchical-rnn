@@ -40,7 +40,7 @@ class HMLSTMNetwork(object):
         self._num_layers = num_layers
         self._input_size = input_size
         self._session = None
-        self._graph = dict()
+        self._graph = None
         self._task = task
         self._output_size = output_size
 
@@ -248,7 +248,7 @@ class HMLSTMNetwork(object):
         return h_aboves
 
     def network(self, reuse):
-        batch_size = tf.shape(self.batch_in)[0]
+        batch_size = tf.shape(self.batch_in)[1]
         hmlstm = self.create_multicell(batch_size, reuse)
 
         def scan_rnn(accum, elem):
@@ -418,7 +418,7 @@ class HMLSTMNetwork(object):
 
     def _get_graph(self):
         if self._graph is None:
-            self._graph = self.network(reuse=True)
+            self._graph = self.network(reuse=False)
         return self._graph
 
     def _load_vars(self, variable_path):

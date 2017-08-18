@@ -326,6 +326,8 @@ class HMLSTMNetwork(object):
         epochs: integer, number of epochs
         """
 
+        optim, loss, _, _ = self._get_graph()
+
         if not load_vars_from_disk:
             if self._session is None:
 
@@ -338,7 +340,6 @@ class HMLSTMNetwork(object):
         for epoch in range(epochs):
             print('Epoch %d' % epoch)
             for batch_in, batch_out in zip(batches_in, batches_out):
-                optim, loss, _, _ = self._get_graph()
                 ops = [optim, loss]
                 feed_dict = {
                     self.batch_in: np.swapaxes(batch_in, 0, 1),

@@ -350,7 +350,8 @@ class HMLSTMNetwork(object):
 
         self.save_variables(variable_path)
 
-    def predict(self, batch, variable_path='./hmlstm_ckpt'):
+    def predict(self, batch, variable_path='./hmlstm_ckpt',
+                return_gradients=False):
         """
         Make predictions.
 
@@ -376,10 +377,15 @@ class HMLSTMNetwork(object):
 
         # batch_out is not used for prediction, but needs to be fed in
         batch_out_size = (batch.shape[1], batch.shape[0], self._output_size)
-        _predictions = self._session.run(predictions, {
+        gradients = tf.gradients(predictions[-1:, :], self.batch_in)
+        _predictions, _gradients = self._session.run([predictions, gradients], {
             self.batch_in: np.swapaxes(batch, 0, 1),
             self.batch_out: np.zeros(batch_out_size),
         })
+
+        if return_gradients:
+            return tuple(np.swapaxes(r, 0, 1) for
+                         r in (_predictions, _gradients[0]))
 
         return np.swapaxes(_predictions, 0, 1)
 
